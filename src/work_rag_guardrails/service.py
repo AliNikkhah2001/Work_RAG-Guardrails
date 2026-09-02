@@ -247,7 +247,7 @@ def _clean_gemma_output(text: str) -> str:
 
     if not text:
         return text
-    # Remove all known control tokens: <unusedXX>, <|tool_call|>, <tool_call|>, <|tool_call>, etc.
+    # Remove all known control tokens: <unusedXX>, <|tool_call|>, <|"|>, [multimodal], etc.
     text = re.sub(r"<unused\d+>", "", text)
     text = re.sub(r"<\|?tool_call\|?>", "", text)
     text = re.sub(r"<\|?tool_response\|?>", "", text)
@@ -260,6 +260,9 @@ def _clean_gemma_output(text: str) -> str:
     text = re.sub(r"<bos>", "", text)
     text = re.sub(r"<eos>", "", text)
     text = re.sub(r"<\|?tool\|?>", "", text)
+    text = re.sub(r"<\|\s*\"\s*\|>", "", text)  # <|"|>
+    text = re.sub(r"<\|\s*'\s*\|>", "", text)
+    text = re.sub(r"<\|[^>]*\|>", "", text)  # any <|...|>
     # Collapse whitespace and strip
     text = re.sub(r"\s+", " ", text).strip()
     return text
