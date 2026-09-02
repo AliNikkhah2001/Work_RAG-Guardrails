@@ -82,6 +82,12 @@ class TestHurtlexAllowlistBenign:
         blocked, reason = check_hurtlex_fa(text)
         assert blocked is False, f"پستی blocked as {reason}"
 
+    def test_khaste_allowed(self):
+        """خسته in polite greeting context must be allowed (v7 KB chunk: سلام خسته نباشید)."""
+        text = "سلام خسته نباشید، من یه وام گرفتم"
+        blocked, reason = check_hurtlex_fa(text)
+        assert blocked is False, f"خسته blocked as {reason}"
+
     def test_zaif_allowed(self):
         """ضعیف in credit rating context must be allowed (expected answers)."""
         text = "رتبه اعتباری ضعیف می‌تواند باعث رد درخواست وام شود"

@@ -11,7 +11,8 @@
     "نادرست",
     "پستی",
     "مهم",
-    "ضعیف"
+    "ضعیف",
+    "خسته"
   ],
   "normalized_allowlist": [
     "حذف",
@@ -24,7 +25,8 @@
     "نادرست",
     "پستی",
     "مهم",
-    "ضعیف"
+    "ضعیف",
+    "خسته"
   ],
   "evidence": {
     "حذف": "2 KB chunks + 2 credit phrases flagged; legitimate: 'درخواست حذف سابقه منفی قدیمی از گزارش اعتباری'",
@@ -37,7 +39,8 @@
     "نادرست": "1 RAG answer blocked in Phase 5; legitimate: 'اطلاعات نادرست را اصلاح کنید' — common in credit report corrections",
     "پستی": "Phase 7 user sample: 'چگونه می‌توان گزارش چک را مجدداً دریافت کرد؟' blocked as hate:پستی (KB context contains پستی) — legitimate term in credit forms",
     "مهم": "KB chunk contains 'مهم است' (important) — flagged as hate:مهم for query 'جدول نوع تماس' (Type Of Contact) — legitimate, not hate",
-    "ضعیف": "6 expected answers contain 'ضعیف' (weak credit rating) — flagged as hate:ضعیف, legitimate: 'رتبه اعتباری ضعیف می‌تواند باعث رد درخواست وام شود'"
+    "ضعیف": "6 expected answers contain 'ضعیف' (weak credit rating) — flagged as hate:ضعیف, legitimate: 'رتبه اعتباری ضعیف می‌تواند باعث رد درخواست وام شود'",
+    "خسته": "v7 KB chunk for 'سلام' contains 'سلام خسته نباشید، من یه وام گرفتم...' — flagged as hate:خسته (tired), but 'خسته نباشید' is polite greeting, not hate"
   },
   "policy": "For MVP, these lemmas are allowlisted for both input and output HurtLex checks when they appear as exact-word matches. Profanity, PII, secret remain strict. Input vs output policy separated: output allowlist is primary; input allowlist prevents trusted KB context from triggering false positives in guarded_completion's augmented prompt check."
 }
