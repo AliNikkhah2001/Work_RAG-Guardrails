@@ -8,7 +8,8 @@
     "پست",
     "مصرف",
     "هدف",
-    "نادرست"
+    "نادرست",
+    "پستی"
   ],
   "normalized_allowlist": [
     "حذف",
@@ -18,7 +19,8 @@
     "پست",
     "مصرف",
     "هدف",
-    "نادرست"
+    "نادرست",
+    "پستی"
   ],
   "evidence": {
     "حذف": "2 KB chunks + 2 credit phrases flagged; legitimate: 'درخواست حذف سابقه منفی قدیمی از گزارش اعتباری'",
@@ -28,7 +30,8 @@
     "پست": "1 credit phrase; 'پست سازمانی و سمت شغلی'",
     "مصرف": "1 bench question; 'گزارش‌های مصرف را به‌صورت خودکار'",
     "هدف": "1 KB chunk; 'هدف از دریافت تسهیلات'",
-    "نادرست": "1 RAG answer blocked in Phase 5; legitimate: 'اطلاعات نادرست را اصلاح کنید' — common in credit report corrections"
+    "نادرست": "1 RAG answer blocked in Phase 5; legitimate: 'اطلاعات نادرست را اصلاح کنید' — common in credit report corrections",
+    "پستی": "Phase 7 user sample: 'چگونه می‌توان گزارش چک را مجدداً دریافت کرد؟' blocked as hate:پستی (KB context contains پستی) — legitimate term in credit forms"
   },
   "policy": "For MVP, these lemmas are allowlisted for both input and output HurtLex checks when they appear as exact-word matches. Profanity, PII, secret remain strict. Input vs output policy separated: output allowlist is primary; input allowlist prevents trusted KB context from triggering false positives in guarded_completion's augmented prompt check."
 }

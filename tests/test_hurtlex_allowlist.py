@@ -75,6 +75,12 @@ class TestHurtlexAllowlistBenign:
         blocked, _ = check_hurtlex_fa(text)
         assert blocked is False
 
+    def test_posti_allowed(self):
+        """پستی in credit context must be allowed (Phase 7: گزارش چک)."""
+        text = "نحوه دریافت مجدد گزارش چک از طریق پستی امکان‌پذیر است"
+        blocked, reason = check_hurtlex_fa(text)
+        assert blocked is False, f"پستی blocked as {reason}"
+
     def test_nadorost_allowed(self):
         """نادرست in credit correction context must be allowed (Phase 5 failure)."""
         text = "برای پیگیری اصلاح اطلاعات نادرست در گزارش اعتباری، می‌توانید از طریق CRM اقدام کنید"
