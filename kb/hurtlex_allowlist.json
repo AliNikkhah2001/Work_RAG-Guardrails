@@ -1,0 +1,34 @@
+{
+  "_comment": "Benign HurtLex lemmas that are legitimate in Persian credit/RAG domain. Reviewed in Phase 2 audit (30 benign texts, 7 false positives). These are NOT disabled globally; they are only allowlisted for output and for input when they appear in trusted KB context. Profanity/PII/secret remain strict.",
+  "allowlist": [
+    "حذف",
+    "بخشی",
+    "تامین مالی",
+    "اشتغال",
+    "پست",
+    "مصرف",
+    "هدف",
+    "نادرست"
+  ],
+  "normalized_allowlist": [
+    "حذف",
+    "بخشی",
+    "تامین مالی",
+    "اشتغال",
+    "پست",
+    "مصرف",
+    "هدف",
+    "نادرست"
+  ],
+  "evidence": {
+    "حذف": "2 KB chunks + 2 credit phrases flagged; legitimate: 'درخواست حذف سابقه منفی قدیمی از گزارش اعتباری'",
+    "بخشی": "1 credit phrase; documented in VAST_GEMMA4_MIGRATION.md as known false positive; 'بخشی از اطلاعات'",
+    "تامین مالی": "1 credit phrase; core term 'تامین مالی از طریق تسهیلات بانکی'",
+    "اشتغال": "1 credit phrase; 'اشتغال و سابقه بیمه در امتیاز اعتباری'",
+    "پست": "1 credit phrase; 'پست سازمانی و سمت شغلی'",
+    "مصرف": "1 bench question; 'گزارش‌های مصرف را به‌صورت خودکار'",
+    "هدف": "1 KB chunk; 'هدف از دریافت تسهیلات'",
+    "نادرست": "1 RAG answer blocked in Phase 5; legitimate: 'اطلاعات نادرست را اصلاح کنید' — common in credit report corrections"
+  },
+  "policy": "For MVP, these lemmas are allowlisted for both input and output HurtLex checks when they appear as exact-word matches. Profanity, PII, secret remain strict. Input vs output policy separated: output allowlist is primary; input allowlist prevents trusted KB context from triggering false positives in guarded_completion's augmented prompt check."
+}

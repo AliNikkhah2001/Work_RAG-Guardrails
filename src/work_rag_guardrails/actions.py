@@ -68,6 +68,28 @@ def load_hurtlex() -> List[str]:
     except Exception:
         return []
 
+
+@lru_cache(maxsize=1)
+def load_hurtlex_allowlist() -> List[str]:
+    """Reviewed benign allowlist for credit/RAG domain.
+    Loaded from kb/hurtlex_allowlist.json. If missing, returns empty.
+    Applied to both input and output HurtLex checks for MVP to prevent
+    false positives on legitimate financial terminology (e.g., حذف, بخشی).
+    Profanity/PII/secret remain strict and are NOT allowlisted.
+    """
+    try:
+        p = _kb_path("hurtlex_allowlist.json")
+        data = json.loads(p.read_text(encoding="utf-8"))
+        # Support {"allowlist": [...]} or direct list
+        raw = data.get("allowlist") if isinstance(data, dict) and "allowlist" in data else data
+        if isinstance(raw, dict):
+            raw = raw.get("allowlist", [])
+        if not isinstance(raw, list):
+            return []
+        return [normalize_persian(w) for w in raw if isinstance(w, str) and w.strip()]
+    except Exception:
+        return []
+
 @lru_cache(maxsize=1)
 def load_injection_patterns() -> List[Dict]:
     try:
@@ -133,6 +155,34 @@ def check_profanity_fa(text: str) -> Tuple[bool, str]:
     return False, ""
 
 def check_hurtlex_fa(text: str) -> Tuple[bool, str]:
+    """HurtLex check with benign allowlist for credit domain.
+    Preserves exact-word matching (\b...\b) and logs matches for audit.
+    Allowlisted lemmas (e.g., حذف, بخشی) are skipped — they are legitimate
+    in credit-reporting context and were verified as false positives in
+    Phase 2 audit (30 benign texts). Profanity/PII remain strict.
+    """
+    norm = normalize_persian(text)
+    allowlist = set(load_hurtlex_allowlist())
+    for w in load_hurtlex():
+        if w and len(w) > 2 and w not in allowlist and re.search(rf"\b{re.escape(w)}\b", norm):
+            # Log for audit (INFO so visible in guard.log)
+            import logging
+
+            logging.getLogger(__name__).info(
+                "HurtLex match: lemma=%r normalized=%r span=%r",
+                w,
+                norm[:200],
+                re.search(rf"\b{re.escape(w)}\b", norm).group() if re.search(rf"\b{re.escape(w)}\b", norm) else w,
+            )
+            return True, f"hate:{w[:20]}"
+    return False, ""
+
+
+def check_hurtlex_fa_strict(text: str) -> Tuple[bool, str]:
+    """Strict HurtLex without allowlist — for hostile user input where
+    even credit terms should trigger caution. Not used in MVP RAG path;
+    kept for audit/comparison.
+    """
     norm = normalize_persian(text)
     for w in load_hurtlex():
         if w and len(w) > 2 and re.search(rf"\b{re.escape(w)}\b", norm):
