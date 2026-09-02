@@ -236,6 +236,35 @@ async def check_rails(request: RailCheckRequest) -> RailCheckResponse:
         )
 
 
+def _clean_gemma_output(text: str) -> str:
+    """Remove Gemma control/tool tokens that leak from llama.cpp.
+
+    Safety net for Gemma-4 UD-Q4_K_XL + llama.cpp b1 template mismatch.
+    Proper fix is to update chat template / llama.cpp build, but filtering
+    prevents user-facing leakage.
+    """
+    import re
+
+    if not text:
+        return text
+    # Remove all known control tokens: <unusedXX>, <|tool_call|>, <tool_call|>, <|tool_call>, etc.
+    text = re.sub(r"<unused\d+>", "", text)
+    text = re.sub(r"<\|?tool_call\|?>", "", text)
+    text = re.sub(r"<\|?tool_response\|?>", "", text)
+    text = re.sub(r"tool_response\|>", "", text)
+    text = re.sub(r"tool_call\|>", "", text)
+    text = re.sub(r"\[multimodal\]", "", text)
+    text = re.sub(r"<\|channel>thought.*?<channel\|>", "", text, flags=re.DOTALL)
+    text = re.sub(r"<\|think\|>", "", text)
+    text = re.sub(r"<\|turn>.*?<turn\|>", "", text, flags=re.DOTALL)
+    text = re.sub(r"<bos>", "", text)
+    text = re.sub(r"<eos>", "", text)
+    text = re.sub(r"<\|?tool\|?>", "", text)
+    # Collapse whitespace and strip
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 async def _call_upstream(messages: list, request: ChatCompletionRequest) -> str:
     """Direct OpenAI-compatible call to the upstream Gemma manager."""
     settings = get_settings()
@@ -259,7 +288,8 @@ async def _call_upstream(messages: list, request: ChatCompletionRequest) -> str:
         )
         resp.raise_for_status()
         data = resp.json()
-        return data["choices"][0]["message"]["content"]
+        raw = data["choices"][0]["message"]["content"]
+        return _clean_gemma_output(raw)
 
 
 async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionResponse:
@@ -307,6 +337,10 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
         else:
             # Direct upstream call - output checked by check_output_persian below
             bot_response = await _call_upstream(upstream_messages, request)
+
+        # Safety: if cleaning left empty (model only emitted control tokens), provide grounded fallback
+        if not bot_response or not bot_response.strip():
+            bot_response = "متأسفم، مدل پاسخ مناسبی تولید نکرد. بر اساس منابع بازیابی‌شده، لطفاً سوال را واضح‌تر بپرسید."
 
         # 3. Output rail check
         output_check = await check_rails(
