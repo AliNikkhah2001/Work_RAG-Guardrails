@@ -286,6 +286,7 @@ async def _call_upstream(messages: list, request: ChatCompletionRequest) -> str:
                 "messages": messages,
                 "max_tokens": request.max_tokens or 4000,
                 "temperature": request.temperature,
+                "chat_template_kwargs": {"enable_thinking": False},
             },
             headers={"Authorization": f"Bearer {settings.upstream_llm_api_key}"},
         )
