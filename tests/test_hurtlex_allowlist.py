@@ -10,6 +10,7 @@ from work_rag_guardrails.actions import (
     check_hurtlex_fa_strict,
     check_input_persian,
     check_output_persian,
+    check_profanity_fa,
     normalize_persian,
 )
 
@@ -80,6 +81,24 @@ class TestHurtlexAllowlistBenign:
         text = "نحوه دریافت مجدد گزارش چک از طریق پستی امکان‌پذیر است"
         blocked, reason = check_hurtlex_fa(text)
         assert blocked is False, f"پستی blocked as {reason}"
+
+    def test_zaif_allowed(self):
+        """ضعیف in credit rating context must be allowed (expected answers)."""
+        text = "رتبه اعتباری ضعیف می‌تواند باعث رد درخواست وام شود"
+        blocked, reason = check_hurtlex_fa(text)
+        assert blocked is False, f"ضعیف blocked as {reason}"
+
+    def test_mohem_allowed(self):
+        """مهم in benign context must be allowed (KB chunk contains مهم است)."""
+        text = "تطبیق با قرارداد و کنترل ریسک مهم است"
+        blocked, reason = check_hurtlex_fa(text)
+        assert blocked is False, f"مهم blocked as {reason}"
+
+    def test_short_profanity_not_flagged(self):
+        """Very short fragments like 'ان' should not be flagged as profanity when in KB context."""
+        text = "اثر ان را مشاهده کرد"
+        blocked, reason = check_profanity_fa(text)
+        assert blocked is False, f"ان incorrectly flagged as {reason}"
 
     def test_nadorost_allowed(self):
         """نادرست in credit correction context must be allowed (Phase 5 failure)."""

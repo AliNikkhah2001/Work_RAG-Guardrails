@@ -148,9 +148,9 @@ def check_jailbreak_fa(text: str) -> Tuple[bool, str]:
 
 def check_profanity_fa(text: str) -> Tuple[bool, str]:
     norm = normalize_persian(text)
-    # word-boundary check
+    # word-boundary check — skip very short fragments (e.g., "ان" length 2) that cause false positives on KB chunks
     for w in load_swear():
-        if w and re.search(rf"\b{re.escape(w)}\b", norm):
+        if w and len(w) > 2 and re.search(rf"\b{re.escape(w)}\b", norm):
             return True, f"profanity:{w[:20]}"
     return False, ""
 
