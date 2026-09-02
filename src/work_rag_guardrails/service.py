@@ -451,7 +451,7 @@ def main():
     uvicorn.run(
         "work_rag_guardrails.api:create_app",
         factory=True,
-        host="127.0.0.1",
+        host=settings.guardrails_host,
         port=settings.guardrails_port,
         log_level="info",
     )

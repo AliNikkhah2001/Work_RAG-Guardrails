@@ -17,13 +17,32 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Server
+    # Server — bind host configurable for Docker (0.0.0.0) vs local (127.0.0.1)
+    guardrails_host: str = "0.0.0.0"
     guardrails_port: int = 8200
 
-    # Upstream LLM (Gemma manager)
+    # Upstream LLM (Gemma manager) — supports LLM_BASE_URL alias for Vast
     upstream_llm_base_url: str = "http://127.0.0.1:9000/v1"
+    llm_base_url: str | None = None
     upstream_llm_model: str = "gemma-4-31b"
+    llm_model: str | None = None
     upstream_llm_api_key: str = "sk-local-dev"
+    llm_api_key: str | None = None
+
+    def _resolve_upstream(self, primary: str, alias: str | None) -> str:
+        return alias if alias else primary
+
+    @property
+    def resolved_base_url(self) -> str:
+        return self._resolve_upstream(self.upstream_llm_base_url, self.llm_base_url)
+
+    @property
+    def resolved_model(self) -> str:
+        return self._resolve_upstream(self.upstream_llm_model, self.llm_model)
+
+    @property
+    def resolved_api_key(self) -> str:
+        return self._resolve_upstream(self.upstream_llm_api_key, self.llm_api_key)
 
     # Timeouts
     upstream_connect_timeout: float = 10.0
@@ -38,12 +57,12 @@ class Settings(BaseSettings):
     @property
     def upstream_chat_url(self) -> str:
         """Full URL for chat completions endpoint."""
-        return f"{self.upstream_llm_base_url.rstrip('/')}/chat/completions"
+        return f"{self.resolved_base_url.rstrip('/')}/chat/completions"
 
     @property
     def upstream_health_url(self) -> str:
         """Manager health endpoint (root-level, not under /v1)."""
-        base = self.upstream_llm_base_url.rstrip("/")
+        base = self.resolved_base_url.rstrip("/")
         if base.endswith("/v1"):
             base = base[:-3]
         return f"{base}/health"
