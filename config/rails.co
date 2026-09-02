@@ -1,0 +1,151 @@
+# Input rail flows — Persian-aware (Colang 1.0)
+# All text is normalized in Python actions before Colang, but Colang does lower() fallback.
+
+define flow check_input_size
+  $user_message = $last_user_message
+  if len($user_message) > 4000
+    bot refuse "متن ورودی بیش از حد طولانی است (حداکثر 4000 نویسه)."
+  end
+  if len($user_message.strip()) == 0
+    bot refuse "ورودی خالی مجاز نیست."
+  end
+end
+
+define flow check_persian_normalization
+  # No-op in Colang - actual normalization (ZWNJ, ك->ک, ي->ی, digits) done in actions.normalize_persian
+  # This flow documents the requirement: every downstream flow must use normalized text.
+  $normalized = $last_user_message
+end
+
+define flow check_prompt_injection_fa
+  $user_message = lower($last_user_message.translate(_PERSIAN_TABLE))
+  if $user_message matches r"(دستورات|پرامپت).*(قبلی|سیستم).*(نادیده|فراموش)"
+    or $user_message matches r"(نقش|شخصیت).*(جدید|دان|DAN)"
+    or $user_message matches r"(نشان بده|فاش کن).*(پرامپت|کلید|توکن)"
+      bot refuse "درخواست شما قابل اجرا نیست."
+  end
+  $patterns = $config.injection_patterns
+  for $pattern in $patterns
+    if $pattern in $user_message
+      bot refuse $config.refusal_injection
+    end
+  end
+  # Python deterministic check kb/prompt_injection_fa.json (26 patterns + regex + code-switch)
+  execute check_prompt_injection_fa_action
+end
+
+# Spec example flow (kept as alias for docs) - uses same regexes above
+define flow check_prompt_injection_fa_spec
+  $text = lower($last_user_message.translate(_PERSIAN_TABLE))
+  if $text matches r"(دستورات|پرامپت).*(قبلی|سیستم).*(نادیده|فراموش)"
+    or $text matches r"(نقش|شخصیت).*(جدید|دان|DAN)"
+    or $text matches r"(نشان بده|فاش کن).*(پرامپت|کلید|توکن)"
+      bot refuse "درخواست شما قابل اجرا نیست."
+end
+
+define flow check_jailbreak_fa
+  $user_message = lower($last_user_message)
+  $jailbreak_triggers = [
+    "دان", "dan", "جلبریک", "jailbreak",
+    "حالت توسعه دهنده", "developer mode", "sudo mode",
+    "بدون سانسور", "uncensored", "بدون محدودیت", "unrestricted",
+    "نقش جدید", "از این به بعد تو", "you are now"
+  ]
+  for $t in $jailbreak_triggers
+    if $t in $user_message
+      bot refuse $config.refusal_injection
+    end
+  end
+end
+
+define flow check_hate_offense_fa
+  # Delegates to Python actions: hurtlex + swear + Pars-OFF classifier
+  execute check_hate_offense_fa_action
+end
+
+define flow check_out_of_scope
+  # ICS credit-scoring domain check - kb/out_of_scope.json
+  execute check_out_of_scope_action
+end
+
+define flow check_internal_prompt_disclosure_fa
+  $user_message = lower($last_user_message)
+  $triggers = [
+    "system prompt", "پرامپت سیستم",
+    "developer prompt", "پرامپت توسعه دهنده",
+    "initial prompt", "دستورات اولیه",
+    "your instructions", "دستورات تو",
+    "configuration", "پیکربندی",
+    "prompt template", "قالب پرامپت",
+    "دستورات داخلی", "hidden prompt"
+  ]
+  for $t in $triggers
+    if $t in $user_message
+      bot refuse "دستورات داخلی قابل اشتراک‌گذاری نیست."
+    end
+  end
+end
+
+# Output rail flows
+
+define flow check_output_secrets
+  $bot_message = $last_bot_message
+  $markers = ["sk-", "api_key", "secret", "password", "token", "Bearer ", "DATABASE_URL"]
+  $lowered = lower($bot_message)
+  for $m in $markers
+    if $m in $lowered
+      bot refuse "نمی‌توانم این اطلاعات را ارائه دهم."
+    end
+  end
+end
+
+define flow check_output_prompt_markers
+  $bot_message = $last_bot_message
+  $markers = ["[INST]", "<<SYS>>", "<|system|>", "### Instruction:", "Human:", "Assistant:"]
+  for $m in $markers
+    if $m in $bot_message
+      bot refuse "نمی‌توانم این اطلاعات را ارائه دهم."
+    end
+  end
+end
+
+define flow check_profanity_fa
+  execute check_profanity_fa_action
+end
+
+define flow check_hurtlex
+  execute check_hurtlex_action
+end
+
+define flow check_hurtlex_fa
+  execute check_hurtlex_fa_action
+end
+
+define flow check_pii_ir
+  execute check_pii_ir_action
+end
+
+# Main composites
+define flow rails_check_input
+  execute check_input_size
+  execute check_prompt_injection_fa
+  execute check_jailbreak_fa
+  execute check_hate_offense_fa
+  execute check_out_of_scope
+  execute check_internal_prompt_disclosure_fa
+  return allowed
+end
+
+define flow rails_check_output
+  execute check_output_secrets
+  execute check_output_prompt_markers
+  execute check_profanity_fa
+  execute check_hurtlex_fa
+  return allowed
+end
+
+define bot refuse $message
+  $refusal = $message
+  set $allowed = False
+  return $refusal
+end

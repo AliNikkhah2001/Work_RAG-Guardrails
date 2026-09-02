@@ -1,0 +1,44 @@
+{
+  "description": "Credit-scoring RAG - allowed vs out-of-scope topics (Persian)",
+  "allowed_keywords": [
+    "اعتبارسنجی", "گزارش اعتباری", "امتیاز اعتباری", "رتبه اعتباری",
+    "شرکت اعتبارسنجی ایران", "آیس", "ICS",
+    "تسهیلات", "وام", "چک", "سفته", "ضامن",
+    "بانک مرکزی", "سیماح", "SIMAH",
+    "داده اعتباری", "قرارداد", "اقساط", "بدهی",
+    "استعلام", "پنل اعتباریتو", "API اعتبارسنجی",
+    "مدل امتیازدهی", "عامل امتیاز", "دلیل کد", "reason code"
+  ],
+  "out_of_scope_categories": [
+    {
+      "id": "politics",
+      "label": "سیاسی",
+      "keywords": ["انتخابات", "حزب", "دولت", "مجلس", "رهبر", "انقلاب", "تحریم"],
+      "action": "refuse",
+      "message": "این دستیار فقط در حوزه اعتبارسنجی و گزارش اعتباری پاسخ می‌دهد."
+    },
+    {
+      "id": "medical",
+      "label": "پزشکی",
+      "keywords": ["پزشکی", "دارو", "درمان", "بیماری", "تشخیص"],
+      "action": "refuse",
+      "message": "سوال پزشکی خارج از حوزه این سامانه است."
+    },
+    {
+      "id": "religion",
+      "label": "مذهبی",
+      "keywords": ["فتوا", "شرع", "مذهب"],
+      "action": "refuse",
+      "message": "سوالات مذهبی خارج از محدوده است."
+    },
+    {
+      "id": "general_chat",
+      "label": "گپ عمومی",
+      "keywords": ["جوک بگو", "شعر بگو", "داستان بنویس", "آهنگ"],
+      "action": "refuse",
+      "message": "این دستیار فقط برای راهنمایی اعتبارسنجی طراحی شده است."
+    }
+  ],
+  "threshold": 0.7,
+  "note": "If query contains none of allowed_keywords and matches out_of_scope, return out_of_scope refusal. Guardrail should not block if query is credit-related even if it contains a borderline word."
+}
