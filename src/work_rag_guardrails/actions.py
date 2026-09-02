@@ -111,10 +111,17 @@ def check_prompt_injection_fa(text: str) -> Tuple[bool, str]:
 
 def check_jailbreak_fa(text: str) -> Tuple[bool, str]:
     norm = normalize_persian(text)
-    triggers = ["دان", "jailbreak", "جلبریک", "حالت توسعه دهنده", "developer mode", "sudo mode", "بدون سانسور", "بدون محدودیت", "نقش جدید", "unrestricted"]
+    triggers = ["jailbreak", "جلبریک", "حالت توسعه دهنده", "developer mode", "sudo mode", "بدون سانسور", "بدون محدودیت", "نقش جدید", "unrestricted"]
+    # Phrase triggers: substring search
     for t in triggers:
         if normalize_persian(t) in norm:
             return True, f"jailbreak:{t}"
+    # Short/substring-sensitive triggers: word-boundary only
+    # "دان" (DAN) should not match "دانش" / "بدانید" — require word boundary or phrase "نقش دان"
+    if re.search(r"\bدان\b", norm):
+        return True, "jailbreak:دان"
+    if re.search(r"نقش\s+دان", norm):
+        return True, "jailbreak:نقش دان"
     return False, ""
 
 def check_profanity_fa(text: str) -> Tuple[bool, str]:
