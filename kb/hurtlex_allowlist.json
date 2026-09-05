@@ -12,7 +12,10 @@
     "پستی",
     "مهم",
     "ضعیف",
-    "خسته"
+    "خسته",
+    "شرح",
+    "دسته",
+    "جزئی"
   ],
   "normalized_allowlist": [
     "حذف",
@@ -26,7 +29,10 @@
     "پستی",
     "مهم",
     "ضعیف",
-    "خسته"
+    "خسته",
+    "شرح",
+    "دسته",
+    "جزئی"
   ],
   "evidence": {
     "حذف": "2 KB chunks + 2 credit phrases flagged; legitimate: 'درخواست حذف سابقه منفی قدیمی از گزارش اعتباری'",
@@ -40,7 +46,10 @@
     "پستی": "Phase 7 user sample: 'چگونه می‌توان گزارش چک را مجدداً دریافت کرد؟' blocked as hate:پستی (KB context contains پستی) — legitimate term in credit forms",
     "مهم": "KB chunk contains 'مهم است' (important) — flagged as hate:مهم for query 'جدول نوع تماس' (Type Of Contact) — legitimate, not hate",
     "ضعیف": "6 expected answers contain 'ضعیف' (weak credit rating) — flagged as hate:ضعیف, legitimate: 'رتبه اعتباری ضعیف می‌تواند باعث رد درخواست وام شود'",
-    "خسته": "v7 KB chunk for 'سلام' contains 'سلام خسته نباشید، من یه وام گرفتم...' — flagged as hate:خسته (tired), but 'خسته نباشید' is polite greeting, not hate"
+    "خسته": "v7 KB chunk for 'سلام' contains 'سلام خسته نباشید، من یه وام گرفتم...' — flagged as hate:خسته (tired), but 'خسته نباشید' is polite greeting, not hate",
+    "شرح": "v7 RAG for 'دلایل کاهش امتیاز اعتباری برای مشتریان حقوقی چیست؟' blocked as hate:شرح (in generated answer or KB chunk 'شرح'), but 'شرح' means description/explanation, legitimate in credit reports",
+    "دسته": "v7 RAG for 'رتبه چه فرقی با امتیاز داره؟' blocked as hate:دسته (KB chunk contains دسته‌بندی), but 'دسته' means group/category, legitimate in credit reports",
+    "جزئی": "v7 RAG for 'دلایل کاهش امتیاز اعتباری برای مشتریان حقوقی چیست؟' blocked as hate:جزئی (in KB chunk or generated answer 'جزئی'), but 'جزئی' means partial/minor, legitimate in credit reports"
   },
   "policy": "For MVP, these lemmas are allowlisted for both input and output HurtLex checks when they appear as exact-word matches. Profanity, PII, secret remain strict. Input vs output policy separated: output allowlist is primary; input allowlist prevents trusted KB context from triggering false positives in guarded_completion's augmented prompt check."
 }

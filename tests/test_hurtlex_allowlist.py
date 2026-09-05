@@ -82,6 +82,24 @@ class TestHurtlexAllowlistBenign:
         blocked, reason = check_hurtlex_fa(text)
         assert blocked is False, f"پستی blocked as {reason}"
 
+    def test_sharh_allowed(self):
+        """شرح in credit context must be allowed (v7: دلایل کاهش امتیاز...)."""
+        text = "دلایل کاهش امتیاز اعتباری برای مشتریان حقوقی چیست؟ شرح امتیاز"
+        blocked, reason = check_hurtlex_fa(text)
+        assert blocked is False, f"شرح blocked as {reason}"
+
+    def test_jozei_allowed(self):
+        """جزئی in credit context must be allowed (v7: دلایل کاهش امتیاز...)."""
+        text = "دلایل کاهش امتیاز جزئی برای مشتریان حقوقی"
+        blocked, reason = check_hurtlex_fa(text)
+        assert blocked is False, f"جزئی blocked as {reason}"
+
+    def test_daste_allowed(self):
+        """دسته in credit context must be allowed (v7: رتبه چه فرقی با امتیاز داره؟ -> دسته‌بندی)."""
+        text = "دسته‌بندی امتیاز اعتباری"
+        blocked, reason = check_hurtlex_fa(text)
+        assert blocked is False, f"دسته blocked as {reason}"
+
     def test_khaste_allowed(self):
         """خسته in polite greeting context must be allowed (v7 KB chunk: سلام خسته نباشید)."""
         text = "سلام خسته نباشید، من یه وام گرفتم"
