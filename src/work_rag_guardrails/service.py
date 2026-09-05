@@ -307,10 +307,21 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
         raise ValueError("No user message in request")
 
     last_user_msg = user_messages[-1]["content"]
+    # For RAG, orchestrator sends augmented prompt "[Context...]\n\nQuestion: <original>"
+    # Check only original user query to avoid KB context poisoning (injection FP on "نقش")
+    input_text = last_user_msg
+    if "Question:" in last_user_msg:
+        # Take text after last Question: (original query)
+        input_text = last_user_msg.split("Question:")[-1].strip()
+        # Fallback to full if empty
+        if not input_text:
+            input_text = last_user_msg
+    elif "سوال:" in last_user_msg:
+        input_text = last_user_msg.split("سوال:")[-1].strip() or last_user_msg
 
     # 1. Input rail check
     input_check = await check_rails(
-        RailCheckRequest(stage="input", text=last_user_msg)
+        RailCheckRequest(stage="input", text=input_text)
     )
     if not input_check.allowed:
         # Return refusal response
