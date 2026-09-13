@@ -1,0 +1,13 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Logs and debug artifacts
+*.log
+src/*.json
+tests/__pycache__/
+
+# Environment
+.env
+.env.local
