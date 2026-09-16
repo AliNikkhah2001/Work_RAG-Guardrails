@@ -103,6 +103,7 @@ async def check_rails(request: RailCheckRequest) -> RailCheckResponse:
     """Signals → judge adjudication (NeMo second opinion), fail closed."""
     from .judge import adjudicate
     from . import events
+    import os as _os
 
     settings = get_settings()
     verdict = await adjudicate(request.text, stage=request.stage)
@@ -116,26 +117,36 @@ async def check_rails(request: RailCheckRequest) -> RailCheckResponse:
             request_id=request.request_id,
         )
     category = verdict.get("category", "")
-    # Map to Persian refusal
-    msg_map = {
-        "prompt_injection": "درخواست شما به عنوان تلاش برای دور زدن دستورات شناسایی شد.",
-        "jailbreak": "درخواست شما به عنوان تلاش برای دور زدن محدودیت‌ها شناسایی شد.",
-        "hate": "محتوای شما حاوی زبان آزاردهنده است و قابل پردازش نیست.",
-        "offense": "محتوای شما حاوی الفاظ نامناسب است.",
-        "out_of_scope": "این دستیار فقط در حوزه اعتبارسنجی و گزارش اعتباری (ICS) پاسخ می‌دهد.",
-        "profanity": "محتوای شما حاوی الفاظ نامناسب است.",
-        "pii": "محتوای شما حاوی اطلاعات شخصی است.",
-        "secret": "نمی‌توانم این اطلاعات را ارائه دهم.",
-        "policy": "درخواست شما با سیاست‌های دستیار مغایرت دارد.",
-        "nemo": "درخواست شما توسط بازبینی امنیتی مسدود شد.",
-    }
-    base = msg_map.get(category, "درخواست شما مسدود شد.")
-    if request.stage == "output" and category in ("hate", "offense", "profanity"):
-        base = "پاسخ حاوی محتوای نامناسب است."
+    # Response mode: production hides interception reason/level (premade
+    # message only); verbose/log-level keeps category + reason for debugging.
+    # Full detail always stays in server logs + dashboard events.
+    if settings.guard_response_mode.strip().lower() == "verbose":
+        msg_map = {
+            "prompt_injection": "درخواست شما به عنوان تلاش برای دور زدن دستورات شناسایی شد.",
+            "jailbreak": "درخواست شما به عنوان تلاش برای دور زدن محدودیت‌ها شناسایی شد.",
+            "hate": "محتوای شما حاوی زبان آزاردهنده است و قابل پردازش نیست.",
+            "offense": "محتوای شما حاوی الفاظ نامناسب است.",
+            "out_of_scope": "این دستیار فقط در حوزه اعتبارسنجی و گزارش اعتباری (ICS) پاسخ می‌دهد.",
+            "profanity": "محتوای شما حاوی الفاظ نامناسب است.",
+            "pii": "محتوای شما حاوی اطلاعات شخصی است.",
+            "secret": "نمی‌توانم این اطلاعات را ارائه دهم.",
+            "policy": "درخواست شما با سیاست‌های دستیار مغایرت دارد.",
+            "nemo": "درخواست شما توسط بازبینی امنیتی مسدود شد.",
+        }
+        base = msg_map.get(category, "درخواست شما مسدود شد.")
+        if request.stage == "output" and category in ("hate", "offense", "profanity"):
+            base = "پاسخ حاوی محتوای نامناسب است."
+        return RailCheckResponse(
+            allowed=False, action="refuse", categories=[category or "policy"],
+            reason=base + f" ({verdict.get('reason', '')})",
+            policy_version=settings.policy_version,
+            request_id=request.request_id,
+        )
+    premade = (settings.refusal_message
+               or "متأسفم، نمی‌توانم به این درخواست پاسخ دهم.")
     return RailCheckResponse(
-        allowed=False, action="refuse", categories=[category or "policy"],
-        reason=base + f" ({verdict.get('reason', '')})",
-        policy_version=settings.policy_version,
+        allowed=False, action="refuse", categories=["policy_violation"],
+        reason=premade, policy_version=settings.policy_version,
         request_id=request.request_id,
     )
 

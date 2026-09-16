@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     # Policy
     policy_version: str = "mvp-1"
 
+    # User-facing refusal style: "production" = premade message only (no
+    # interception reason/level leaked); "verbose" = category + reason.
+    guard_response_mode: str = "production"
+    refusal_message: str = "متأسفم، نمی‌توانم به این درخواست پاسخ دهم."
+
     # NeMo Guardrails config path
     nemo_config_path: str = "config"
 
