@@ -119,6 +119,7 @@ judge blocks generically (insult → `hate`, not `out-of-domain`).
 | `GUARD_NEMO_SELFCHECK` | `on` | `shadow` = log only; `off` = skip NeMo |
 | `GUARD_JUDGE_TIMEOUT` | `60` | Judge call timeout (fail closed) |
 | `GUARD_JUDGE_MODEL` | Gemma-4 Q4 | Judge backend model id |
+| `GUARD_RESPONSE_MODE` | `production` | `production` = premade refusal only (`متأسفم، نمی‌توانم…`, generic category — no reason/level leaked); `verbose` = specific message + `(category:reason)` for debugging |
 | `GUARD_EVENTS_FILE` | `/tmp/guard_events.jsonl` | Decision event log (PII-masked) |
 
 ## Business policy store (`policies/`)
