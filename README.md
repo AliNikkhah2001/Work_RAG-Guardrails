@@ -78,32 +78,67 @@ Blocked example:
 
 **Note:** Config default `UPSTREAM_LLM_BASE_URL=9000` is for H200 `server-setup` (manager gateway). Vast production overrides via `LLM_BASE_URL` alias to Gemma :18000.
 
-## Pipeline Stages
+## Pipeline Stages (signals → judge adjudication)
+
+Deterministic detectors no longer block directly (except `secret`) — they emit
+**evidence signals** `{detector, matched, context}` and the LLM judge decides.
+Second opinion: NeMo `LLMRails` Persian self-check flows on local Gemma.
 
 ### Input Rails (stage=input)
 
-| Check | Method | Threshold | Notes |
-|-------|--------|-----------|-------|
-| Empty/Oversize | Deterministic | — | Configurable limits |
-| Prompt Injection | Colang + deterministic | — | "دان" word-boundary jailbreak |
-| HurtLex Persian | `hurtlex_fa_conservative.json` | — | **19-lemma allowlist** (see below) |
-| Profanity Persian | `persian_swear.json` | `len>2` | Fixes `ان` (len 2) false positive |
-| Out-of-Scope | Deterministic | — | Non-credit topics |
-| PII Detection | Regex + NER | 0.90 | Persian patterns |
-| Injection Risk | Heuristic | 0.85 | — |
+| Step | Method | Notes |
+|------|--------|-------|
+| Size/empty | Deterministic | 4000-char cap |
+| Signals | `signals.py` — injection, jailbreak, HurtLex+allowlist, profanity, scope, domain-keyword pre-check | Helpers, not verdicts |
+| Policy judge | Pinned `policies/` categories, `VERDICT: allow/block` | Skipped when clean (`on-signal` mode) |
+| NeMo self-check | `self check input` flow, Gemma backend | Dissent → policy tie-break |
+| Fail policy | — | **Closed** on any error/timeout |
 
 ### Output Rails (stage=output)
 
-| Check | Model | Threshold | Notes |
-|-------|-------|-----------|-------|
-| HurtLex + Allowlist | Deterministic | — | Same 19 lemmas |
-| Profanity | `persian_swear.json` | `len>2` | — |
-| Toxicity | Ghadeer mmBERT | 0.80 | F1 0.94 Persian |
-| Hate Speech | Ghadeer mmBERT | 0.80 | F1 0.94 Persian |
-| Intent Classification | Ghadeer mmBERT | — | Semantic interface |
-| Secret/PII Leak | Regex | 0.90 | API keys, tokens |
+| Step | Method | Notes |
+|------|--------|-------|
+| Signals | HurtLex+allowlist, profanity, PII patterns | Helpers, not verdicts |
+| Policy judge | Same pinned policy, output stage | — |
+| NeMo self-check | `self check output` flow | — |
+| PII mask-and-continue | Regex redact → still answer | National ID / Sheba / phones |
+| Secrets | Hard block | `sk-`, `Bearer`, `api_key`… |
 
-## HurtLex Persian Allowlist (19 Lemmas)
+### Classification taxonomy
+
+`prompt_injection` · `jailbreak` · `hate` · `offense`/`profanity` · `pii` ·
+`out_of_scope`/`out-of-domain` · `secret` · `policy` (business) · `nemo` ·
+`engine_error`. Reports prefer the deterministic signal category when the
+judge blocks generically (insult → `hate`, not `out-of-domain`).
+
+## Judge modes & env
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `GUARD_JUDGE_MODE` | `on-signal` | `always` = judge every text; `on-signal` = judge only on signals |
+| `GUARD_NEMO_SELFCHECK` | `on` | `shadow` = log only; `off` = skip NeMo |
+| `GUARD_JUDGE_TIMEOUT` | `60` | Judge call timeout (fail closed) |
+| `GUARD_JUDGE_MODEL` | Gemma-4 Q4 | Judge backend model id |
+| `GUARD_EVENTS_FILE` | `/tmp/guard_events.jsonl` | Decision event log (PII-masked) |
+
+## Business policy store (`policies/`)
+
+Git-backed versioned prompts: `policies/<domain>-v<semver>.yaml`, enforced
+version pinned in `policies/active.yaml`. Schema: `id/version/stage/categories`
+with `prompt` (`{{text}}`/`{{signals}}`), `refusal`, `examples`, plus
+`domain_keywords` for the fast no-LLM out-of-domain pre-check. Ship new
+versions by adding a file + moving the pin — never edit released versions.
+Current: `ics-credit-v1.0.0` (out-of-domain incl. company/people as in-domain,
+ungrounded-advice).
+
+## Dashboard (same `:8200`)
+
+- `GET /dashboard` — Persian panel: decision counts, block rate, per-category /
+  per-detector bars + SVG plots, terminated-sample viewer (masked), policy+mode header
+- `GET /dashboard/api/stats` · `/dashboard/api/events?limit=&blocked_only=` · `/dashboard/api/policy`
+- Events: `{ts, stage, allowed, category, reason, signals[], text(masked)}`
+
+## HurtLex Persian Allowlist (28 Lemmas)
 
 | Lemma | Domain | Evidence |
 |-------|--------|----------|
@@ -126,16 +161,42 @@ Blocked example:
 | خوشحال | Social | Positive sentiment |
 | سخت | General | `سخت` = difficult |
 | پلیس | Credit | `سوابق پلیس` credit data source |
+| بچه | General | `بچه کجاست؟` birthplace — kid/child |
+| گروه | Business | `گروه/گروه‌بندی` — group |
+| مردم | General | `مردم` — people (blocks everything otherwise) |
+| دختر | General | Girl/daughter |
+| خانم | General | Ms./lady title |
+| پوست | General | Skin |
+| قوم | General | Ethnicity noun (single-word trigger can't see targeting; phrasal detection = future work) |
+| روستایی | General | Rural demographic term |
+| قشر | General | Stratum/class |
 
 **Policy:** Allowlisted for both input and output HurtLex checks on exact-word match. Profanity/PII/secret remain strict.
 
 **File:** `kb/hurtlex_allowlist.json` (with evidence object)
 
-## Risk Scoring & Semantic Interface (v2)
+## Eval (2026-09-16, adjudication battery 11/11)
 
-- **Risk Scorer** (`risk/scorer.py`): PII 0.90, injection 0.85, toxicity/hate 0.80
-- **Semantic Toxicity/Hate/Intent** (`semantic/*.py`): Ghadeer mmBERT, F1 0.94 Persian, lazy-loaded
-- **Observability** (`observability.py`): Structured logging with `request_id`, `stage`, `decision`, `latency_ms`
+Benign allowed: سلام، اعتبارسنجی، بچه‌کجاست، رتبه A/E، ممنون، مدیرعامل.
+Blocked: احمق (`hate`), بمب (`nemo`), دان/injection (`prompt_injection`),
+قرمه‌سبزی (`out-of-domain`). E2E via orchestrator verified (greeting short,
+credit answer + truth block, hostile → `content_filter`).
+
+## Small-model spikes (Persian judge search)
+
+PolyGuard-Qwen-Smol 0.5B: **fails Persian** (English replies, blocks سلام,
+allows احمق). Llama-Guard-3-1B + ShieldGemma-2B: gated downloads + English-only
+cards. Conclusion: judge = local Gemma-4; terminated dashboard samples are
+future training data for a distilled Persian judge.
+
+## Risk Scoring & Semantic Interface (v2 — current)
+
+- **Signals** (`signals.py`): injection, jailbreak, HurtLex+hate, profanity,
+  PII, scope, domain-keyword pre-check — evidence only, thresholds n/a
+- **Judge** (`judge.py`): NeMo `LLMRails` self-check (Gemma `:18000`,
+  `enable_thinking=False`) + pinned-policy adjudication, fail-closed
+- **Observability** (`events.py` + `observability.py`): JSONL decision log with
+  `request_id`, `stage`, `category`, signals, masked text; dashboard aggregates
 
 ## Project Structure
 
