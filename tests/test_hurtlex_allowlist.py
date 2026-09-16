@@ -196,3 +196,9 @@ class TestHurtlexStrictStillBlocked:
         assert blocked_strict is True, "Strict should flag حذف"
         blocked_allow, _ = check_hurtlex_fa(text)
         assert blocked_allow is False, "Allowlisted version should NOT flag حذف"
+
+    def test_madar_allowed(self):
+        """مادر in benign context must be allowed (user: مادر اعتبار سنجی چطور می تونیم گزارش استعلام کنیم)."""
+        text = "مادر اعتبار سنجی چطور می تونیم گزارش استعلام کنیم"
+        blocked, reason = check_hurtlex_fa(text)
+        assert blocked is False, f"مادر blocked as {reason}"

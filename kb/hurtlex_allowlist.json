@@ -28,7 +28,8 @@
     "پوست",
     "قوم",
     "روستایی",
-    "قشر"
+    "قشر",
+    "مادر"
   ],
   "normalized_allowlist": [
     "حذف",
@@ -58,7 +59,8 @@
     "پوست",
     "قوم",
     "روستایی",
-    "قشر"
+    "قشر",
+    "مادر"
   ],
   "evidence": {
     "حذف": "2 KB chunks + 2 credit phrases flagged; legitimate: 'درخواست حذف سابقه منفی قدیمی از گزارش اعتباری'",
@@ -85,7 +87,8 @@
     "پوست": "Ordinary noun skin (identity/appearance contexts). Cannot indicate hate alone.",
     "قوم": "Plain noun ethnicity/tribe in benign questions. Single-word matching cannot see targeting context; genuine ethno-hate needs phrasal/contextual detection (future work), not a lone-noun trigger.",
     "روستایی": "Ordinary demographic adjective rural. Cannot indicate hate alone.",
-    "قشر": "Ordinary socioeconomic noun stratum/class. Cannot indicate hate alone."
+    "قشر": "Ordinary socioeconomic noun stratum/class. Cannot indicate hate alone.",
+    "مادر": "User query 'مادر اعتبار سنجی چطور می تونیم گزارش استعلام کنیم' blocked as hate:مادر. مادر = mother, ordinary noun (birthplace/family/company questions). Targeted abuse using مادر still triggers on the accompanying slur via profanity/HurtLex lists."
   },
   "policy": "For MVP, these lemmas are allowlisted for both input and output HurtLex checks when they appear as exact-word matches. Profanity, PII, secret remain strict. Input vs output policy separated: output allowlist is primary; input allowlist prevents trusted KB context from triggering false positives in guarded_completion's augmented prompt check."
 }
