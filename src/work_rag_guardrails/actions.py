@@ -36,6 +36,30 @@ def normalize_persian(text: str) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     return text.lower()
 
+# Finglish-evasion map: Latin consonants keyboard-substituted INSIDE Persian
+# words (e.g. "kثافت" for کثافت). Applied ONLY to tokens already mixing Latin
+# + Persian letters — pure-Latin tokens (bank, Qwen3, v2) are never touched.
+_CONFUSABLES = str.maketrans({"k": "ک", "g": "گ", "y": "ی", "h": "ه",
+                              "j": "ج", "d": "د", "t": "ت", "s": "س",
+                              "b": "ب", "m": "م", "n": "ن", "r": "ر",
+                              "v": "و", "f": "ف", "l": "ل", "z": "ز",
+                              "a": "ا", "o": "ا", "p": "پ",
+                              "c": "ک", "q": "ق", "u": "و",
+                              "i": "ی", "w": "و"})
+_PERSIAN_LETTER_RE = re.compile(r"[\u0600-\u06FF]")
+_LATIN_LETTER_RE = re.compile(r"[a-z]")
+
+
+def normalize_confusables(text: str) -> str:
+    """Map Latin lookalikes to Persian inside mixed-script tokens only."""
+    out = []
+    for tok in text.split(" "):
+        if _PERSIAN_LETTER_RE.search(tok) and _LATIN_LETTER_RE.search(tok):
+            out.append(tok.translate(_CONFUSABLES))
+        else:
+            out.append(tok)
+    return " ".join(out)
+
 def _kb_path(name: str) -> Path:
     # kb/ is sibling of src/work_rag_guardrails, or config/../../kb
     candidates = [
@@ -149,9 +173,10 @@ def check_jailbreak_fa(text: str) -> Tuple[bool, str]:
 def check_profanity_fa(text: str) -> Tuple[bool, str]:
     norm = normalize_persian(text)
     # word-boundary check — skip very short fragments (e.g., "ان" length 2) that cause false positives on KB chunks
-    for w in load_swear():
-        if w and len(w) > 2 and re.search(rf"\b{re.escape(w)}\b", norm):
-            return True, f"profanity:{w[:20]}"
+    for variant in (norm, normalize_confusables(norm)):
+        for w in load_swear():
+            if w and len(w) > 2 and re.search(rf"\b{re.escape(w)}\b", variant):
+                return True, f"profanity:{w[:20]}"
     return False, ""
 
 def check_hurtlex_fa(text: str) -> Tuple[bool, str]:
@@ -163,18 +188,19 @@ def check_hurtlex_fa(text: str) -> Tuple[bool, str]:
     """
     norm = normalize_persian(text)
     allowlist = set(load_hurtlex_allowlist())
-    for w in load_hurtlex():
-        if w and len(w) > 2 and w not in allowlist and re.search(rf"\b{re.escape(w)}\b", norm):
-            # Log for audit (INFO so visible in guard.log)
-            import logging
+    for variant in (norm, normalize_confusables(norm)):
+        for w in load_hurtlex():
+            if w and len(w) > 2 and w not in allowlist and re.search(rf"\b{re.escape(w)}\b", variant):
+                # Log for audit (INFO so visible in guard.log)
+                import logging
 
-            logging.getLogger(__name__).info(
-                "HurtLex match: lemma=%r normalized=%r span=%r",
-                w,
-                norm[:200],
-                re.search(rf"\b{re.escape(w)}\b", norm).group() if re.search(rf"\b{re.escape(w)}\b", norm) else w,
-            )
-            return True, f"hate:{w[:20]}"
+                logging.getLogger(__name__).info(
+                    "HurtLex match: lemma=%r normalized=%r span=%r",
+                    w,
+                    variant[:200],
+                    re.search(rf"\b{re.escape(w)}\b", variant).group() if re.search(rf"\b{re.escape(w)}\b", variant) else w,
+                )
+                return True, f"hate:{w[:20]}"
     return False, ""
 
 
