@@ -83,15 +83,19 @@ def render_page() -> str:
                     f"<td>{html.escape(e.get('category',''))}</td>"
                     f"<td class='sig'>{html.escape(sigs)}</td>"
                     f"<td>{html.escape((e.get('text') or '')[:300])}</td></tr>")
-    return PAGE.format(
-        policy=html.escape(f"{pol.get('id','-')} v{pol.get('version','-')}"),
-        mode=html.escape(judge_mode()), nemo=html.escape(nemo_mode()),
-        total=st["total"], blocked=st["blocked"], rate=round(st["block_rate"]*100, 2),
-        catbars=catbars or "<p>No blocks logged yet.</p>",
-        svgcat=_svg_bars(st["by_category"], "Blocks by category"),
-        svgdet=_svg_bars(st["by_detector"], "Blocks by detector signal"),
-        n=len(rows), rows="".join(rows) or "<tr><td colspan=5>No terminated samples yet.</td></tr>",
-    )
+    page = PAGE
+    page = page.replace("{policy}", html.escape(f"{pol.get('id','-')} v{pol.get('version','-')}"))
+    page = page.replace("{mode}", html.escape(judge_mode()))
+    page = page.replace("{nemo}", html.escape(nemo_mode()))
+    page = page.replace("{total}", str(st["total"]))
+    page = page.replace("{blocked}", str(st["blocked"]))
+    page = page.replace("{rate}", str(round(st["block_rate"]*100, 2)))
+    page = page.replace("{catbars}", catbars or "<p>No blocks logged yet.</p>")
+    page = page.replace("{svgcat}", _svg_bars(st["by_category"], "Blocks by category"))
+    page = page.replace("{svgdet}", _svg_bars(st["by_detector"], "Blocks by detector signal"))
+    page = page.replace("{n}", str(len(rows)))
+    page = page.replace("{rows}", "".join(rows) or "<tr><td colspan=5>No terminated samples yet.</td></tr>")
+    return page
 
 
 def register(app) -> None:
