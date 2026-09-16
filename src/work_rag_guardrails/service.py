@@ -178,8 +178,10 @@ def _clean_gemma_output(text: str) -> str:
     text = re.sub(r"<\|\s*\"\s*\|>", "", text)  # <|"|>
     text = re.sub(r"<\|\s*'\s*\|>", "", text)
     text = re.sub(r"<\|[^>]*\|>", "", text)  # any <|...|>
-    # Collapse whitespace and strip
-    text = re.sub(r"\s+", " ", text).strip()
+    # Collapse horizontal whitespace but PRESERVE paragraph breaks.
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n[ \t]*\n[ \t]*\n+", "\n\n", text)
+    text = re.sub(r"(?<!\n)\n(?!\n)", " ", text).strip()
     return text
 
 
