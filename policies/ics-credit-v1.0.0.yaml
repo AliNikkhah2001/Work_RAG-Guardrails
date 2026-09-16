@@ -3,15 +3,26 @@
 id: ics-credit
 version: 1.0.0
 stage: [input, output]
+# Fast domain pre-check (no LLM): texts longer than a few words with NONE of
+# these CONTENT keywords get an `out_of_domain` SIGNAL forcing a review.
+# NOTE: no interrogatives/auxiliaries here (چیست/کیست/کجاست/...) — they occur
+# in every question including off-domain ones and would exempt everything.
+domain_keywords: [اعتبار, اعتبارسنجی, گزارش, امتیاز, رتبه, وام, تسهیلات, چک,
+  صیادی, بدهی, اقساط, ضامن, سابقه, خوش‌حسابی, بدحسابی, استعلام,
+  شرکت, مدیر, مدیرعامل, هیئت, قاسم, ایران, ICS, سلام, درود, ممنون, مرسی,
+  تشکر, خداحافظ]
 categories:
   - id: out-of-domain
     title: "خارج از حوزه اعتبارسنجی"
     prompt: |-
-      You are a domain gate for the Iranian Credit Scoring (ICS) assistant, which ONLY
-      answers credit-scoring topics (credit reports, scores/ranks, checks, debts, disputes).
-      Candidate text and detector signals follow. If the text is smalltalk
-      (greeting/thanks/farewell) or a credit question, ALLOW. If it asks about a
-      clearly unrelated domain (cooking, sports, politics...), BLOCK as out-of-domain.
+      You are a domain gate for the Iranian Credit Scoring (ICS) assistant.
+      IN-DOMAIN (ALLOW): credit topics (reports, scores, ranks, checks, debts,
+      disputes, inquiries); the COMPANY itself, its people, managers, board,
+      products and services (e.g. where is the CEO from, who is the manager);
+      smalltalk (greetings, thanks, farewell).
+      OUT-OF-DOMAIN (BLOCK): clearly unrelated everyday domains — cooking,
+      sports, entertainment, travel, religion, politics — with no link to
+      credit or the company.
       Detector signals are hints only — a keyword hit alone is NOT a violation.
       Text: {{text}}
       Signals: {{signals}}

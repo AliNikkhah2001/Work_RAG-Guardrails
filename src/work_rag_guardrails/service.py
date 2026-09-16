@@ -100,140 +100,44 @@ def get_rails_app():
 
 
 async def check_rails(request: RailCheckRequest) -> RailCheckResponse:
-    """Run Persian deterministic rails first, then NeMo."""
+    """Signals → judge adjudication (NeMo second opinion), fail closed."""
+    from .judge import adjudicate
+    from . import events
+
     settings = get_settings()
+    verdict = await adjudicate(request.text, stage=request.stage)
+    events.log_event(request.stage, request.text, verdict,
+                     request_id=request.request_id)
 
-    # ---- 1. Persian deterministic rails (no LLM, fail fast) ----
-    if request.stage == "input":
-        blocked, category, reason = check_input_persian(request.text)
-        if blocked:
-            # Map to Persian refusal
-            msg_map = {
-                "prompt_injection": "درخواست شما به عنوان تلاش برای دور زدن دستورات شناسایی شد.",
-                "jailbreak": "درخواست شما به عنوان تلاش برای دور زدن محدودیت‌ها شناسایی شد.",
-                "hate": "محتوای شما حاوی زبان آزاردهنده است و قابل پردازش نیست.",
-                "offense": "محتوای شما حاوی الفاظ نامناسب است.",
-                "out_of_scope": "این دستیار فقط در حوزه اعتبارسنجی و گزارش اعتباری (ICS) پاسخ می‌دهد.",
-            }
-            return RailCheckResponse(
-                allowed=False,
-                action="refuse",
-                categories=[category],
-                reason=msg_map.get(category, "درخواست شما مسدود شد.") + f" ({reason})",
-                policy_version=settings.policy_version,
-                request_id=request.request_id,
-            )
-    else:
-        blocked, category, reason = check_output_persian(request.text)
-        if blocked:
-            return RailCheckResponse(
-                allowed=False,
-                action="refuse",
-                categories=[category],
-                reason="پاسخ حاوی محتوای نامناسب است." + f" ({reason})",
-                policy_version=settings.policy_version,
-                request_id=request.request_id,
-            )
-
-    # ---- 2. NeMo rails (Colang) - only when nemoguardrails is installed ----
-    rails = get_rails_app()
-    if rails is None:
-        # Deterministic-only mode: Persian checks passed -> allow
+    if verdict["allowed"]:
         return RailCheckResponse(
-            allowed=True,
-            action="allow",
-            categories=[],
-            reason=None,
-            policy_version=settings.policy_version,
+            allowed=True, action="allow", categories=[],
+            reason=None, policy_version=settings.policy_version,
             request_id=request.request_id,
         )
-
-    # Prepare messages for NeMo
-    messages = [{"role": "user", "content": request.text}]
-
-    try:
-        if request.stage == "input":
-            # Run input rails
-            result = await rails.generate_async(messages=messages)
-            # Check if any input rail triggered a refusal
-            # NeMo returns the bot response; if it's a refusal, it's blocked
-            bot_response = result.get("content", "") if isinstance(result, dict) else str(result)
-
-            # Check for refusal indicators
-            is_refusal = any(
-                phrase in bot_response.lower()
-                for phrase in [
-                    "cannot",
-                    "not allowed",
-                    "refuse",
-                    "blocked",
-                    "violation",
-                ]
-            )
-
-            if is_refusal:
-                return RailCheckResponse(
-                    allowed=False,
-                    action="refuse",
-                    categories=["policy_violation"],
-                    reason=bot_response,
-                    policy_version=settings.policy_version,
-                    request_id=request.request_id,
-                )
-            return RailCheckResponse(
-                allowed=True,
-                action="allow",
-                categories=[],
-                reason=None,
-                policy_version=settings.policy_version,
-                request_id=request.request_id,
-            )
-
-        else:  # output stage
-            # Run output rails
-            result = await rails.generate_async(messages=messages)
-            bot_response = result.get("content", "") if isinstance(result, dict) else str(result)
-
-            is_refusal = any(
-                phrase in bot_response.lower()
-                for phrase in [
-                    "cannot",
-                    "not allowed",
-                    "refuse",
-                    "blocked",
-                    "violation",
-                ]
-            )
-
-            if is_refusal:
-                return RailCheckResponse(
-                    allowed=False,
-                    action="refuse",
-                    categories=["output_violation"],
-                    reason=bot_response,
-                    policy_version=settings.policy_version,
-                    request_id=request.request_id,
-                )
-            return RailCheckResponse(
-                allowed=True,
-                action="allow",
-                categories=[],
-                reason=None,
-                policy_version=settings.policy_version,
-                request_id=request.request_id,
-            )
-
-    except Exception as e:
-        log.error("Rail check failed: %s", e)
-        # Fail closed on policy engine errors
-        return RailCheckResponse(
-            allowed=False,
-            action="refuse",
-            categories=["engine_error"],
-            reason=f"Policy engine error: {str(e)}",
-            policy_version=settings.policy_version,
-            request_id=request.request_id,
-        )
+    category = verdict.get("category", "")
+    # Map to Persian refusal
+    msg_map = {
+        "prompt_injection": "درخواست شما به عنوان تلاش برای دور زدن دستورات شناسایی شد.",
+        "jailbreak": "درخواست شما به عنوان تلاش برای دور زدن محدودیت‌ها شناسایی شد.",
+        "hate": "محتوای شما حاوی زبان آزاردهنده است و قابل پردازش نیست.",
+        "offense": "محتوای شما حاوی الفاظ نامناسب است.",
+        "out_of_scope": "این دستیار فقط در حوزه اعتبارسنجی و گزارش اعتباری (ICS) پاسخ می‌دهد.",
+        "profanity": "محتوای شما حاوی الفاظ نامناسب است.",
+        "pii": "محتوای شما حاوی اطلاعات شخصی است.",
+        "secret": "نمی‌توانم این اطلاعات را ارائه دهم.",
+        "policy": "درخواست شما با سیاست‌های دستیار مغایرت دارد.",
+        "nemo": "درخواست شما توسط بازبینی امنیتی مسدود شد.",
+    }
+    base = msg_map.get(category, "درخواست شما مسدود شد.")
+    if request.stage == "output" and category in ("hate", "offense", "profanity"):
+        base = "پاسخ حاوی محتوای نامناسب است."
+    return RailCheckResponse(
+        allowed=False, action="refuse", categories=[category or "policy"],
+        reason=base + f" ({verdict.get('reason', '')})",
+        policy_version=settings.policy_version,
+        request_id=request.request_id,
+    )
 
 
 def _clean_gemma_output(text: str) -> str:
@@ -357,7 +261,7 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
         if not bot_response or not bot_response.strip():
             bot_response = "متأسفم، مدل پاسخ مناسبی تولید نکرد. بر اساس منابع بازیابی‌شده، لطفاً سوال را واضح‌تر بپرسید."
 
-        # 3. Output rail check
+        # 3. Output rail check (signals → judge, fail closed)
         output_check = await check_rails(
             RailCheckRequest(stage="output", text=bot_response)
         )
@@ -373,6 +277,17 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
                     )
                 ],
             )
+        # PII mask-and-continue: redact sensitive spans, still answer.
+        from .actions import check_pii_ir
+        from . import events as _events
+        try:
+            pii_blocked, _ = check_pii_ir(bot_response)
+            if pii_blocked:
+                bot_response = _events.mask_text(bot_response)
+                log.info("output PII masked (request_id=%s)",
+                         getattr(request, "request_id", ""))
+        except Exception:
+            pass
 
         return ChatCompletionResponse(
             model=request.model,
@@ -446,6 +361,7 @@ def create_app():
     """Create FastAPI application."""
     from fastapi import FastAPI, HTTPException, Request
     from fastapi.responses import JSONResponse
+    from .dashboard import register as register_dashboard
 
     app = FastAPI(
         title="Work RAG Guardrails",
@@ -488,6 +404,8 @@ def create_app():
             status_code=500,
             content={"detail": "Internal server error"},
         )
+
+    register_dashboard(app)  # /dashboard + /dashboard/api/* (same :8200)
 
     return app
 
