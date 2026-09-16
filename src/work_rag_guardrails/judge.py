@@ -225,6 +225,7 @@ async def adjudicate(text: str, stage: str = "input") -> Dict[str, Any]:
                      "profanity", "pii"):
             if hard in sig_cats:
                 category = hard
+                reason = f"judge:{hard}"
                 break
         return {"allowed": False, "category": category, "reason": reason,
                 "details": {"signals": signals, "judge": reason}}
