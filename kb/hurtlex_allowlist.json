@@ -19,7 +19,16 @@
     "ناشی",
     "خوشحال",
     "سخت",
-    "پلیس"
+    "پلیس",
+    "بچه",
+    "گروه",
+    "مردم",
+    "دختر",
+    "خانم",
+    "پوست",
+    "قوم",
+    "روستایی",
+    "قشر"
   ],
   "normalized_allowlist": [
     "حذف",
@@ -40,7 +49,16 @@
     "ناشی",
     "خوشحال",
     "سخت",
-    "پلیس"
+    "پلیس",
+    "بچه",
+    "گروه",
+    "مردم",
+    "دختر",
+    "خانم",
+    "پوست",
+    "قوم",
+    "روستایی",
+    "قشر"
   ],
   "evidence": {
     "حذف": "2 KB chunks + 2 credit phrases flagged; legitimate: 'درخواست حذف سابقه منفی قدیمی از گزارش اعتباری'",
@@ -58,7 +76,16 @@
     "شرح": "v7 RAG for 'دلایل کاهش امتیاز اعتباری برای مشتریان حقوقی چیست؟' blocked as hate:شرح (in generated answer or KB chunk 'شرح'), but 'شرح' means description/explanation, legitimate in credit reports",
     "دسته": "v7 RAG for 'رتبه چه فرقی با امتیاز داره؟' blocked as hate:دسته (KB chunk contains دسته‌بندی), but 'دسته' means group/category, legitimate in credit reports",
     "جزئی": "v7 RAG for 'دلایل کاهش امتیاز اعتباری برای مشتریان حقوقی چیست؟' blocked as hate:جزئی (in KB chunk or generated answer 'جزئی'), but 'جزئی' means partial/minor, legitimate in credit reports",
-    "پلیس": "120-question LLM benchmark (2026-09-09): RAG answer for 'مقایسه رقبا... پایگاه داده ملی...' blocked as hate:پلیس. Police records ('سوابق پلیس') are a legitimate credit data source in Iranian credit scoring; 'پلیس' is not hate here."
+    "پلیس": "120-question LLM benchmark (2026-09-09): RAG answer for 'مقایسه رقبا... پایگاه داده ملی...' blocked as hate:پلیس. Police records ('سوابق پلیس') are a legitimate credit data source in Iranian credit scoring; 'پلیس' is not hate here.",
+    "بچه": "User query 'قاسم پور بچه کجاست؟' (where is he from / where is the kid) blocked as hate:بچه. بچه = kid/child, ordinary noun in birthplace and family questions.",
+    "گروه": "RAG answers mentioning گروه/گروه‌بندی (e.g. credit-rating groups) blocked as hate:گروه. Core business vocabulary, not hate.",
+    "مردم": "Ordinary noun 'people' — as a single-word trigger it blocks nearly every Persian sentence containing مردم. Cannot indicate hate alone.",
+    "دختر": "Ordinary noun girl/daughter (bio questions, family status). Cannot indicate hate alone.",
+    "خانم": "Ordinary title Ms./lady. Cannot indicate hate alone.",
+    "پوست": "Ordinary noun skin (identity/appearance contexts). Cannot indicate hate alone.",
+    "قوم": "Plain noun ethnicity/tribe in benign questions. Single-word matching cannot see targeting context; genuine ethno-hate needs phrasal/contextual detection (future work), not a lone-noun trigger.",
+    "روستایی": "Ordinary demographic adjective rural. Cannot indicate hate alone.",
+    "قشر": "Ordinary socioeconomic noun stratum/class. Cannot indicate hate alone."
   },
   "policy": "For MVP, these lemmas are allowlisted for both input and output HurtLex checks when they appear as exact-word matches. Profanity, PII, secret remain strict. Input vs output policy separated: output allowlist is primary; input allowlist prevents trusted KB context from triggering false positives in guarded_completion's augmented prompt check."
 }
