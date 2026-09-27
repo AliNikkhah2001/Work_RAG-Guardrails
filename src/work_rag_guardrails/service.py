@@ -69,9 +69,12 @@ async def initialize_rails() -> None:
     if NEMO_AVAILABLE:
         try:
             # Load NeMo configuration
+            import yaml
             config_dict = load_nemo_config()
+            # G-C1: models is a list, RailsConfig expects YAML string
+            yaml_content = yaml.safe_dump({"models": config_dict.get("models", [])}) if isinstance(config_dict.get("models"), list) else config_dict.get("models", "")
             rails_config = RailsConfig.from_content(
-                yaml_content=config_dict.get("models", []),
+                yaml_content=yaml_content,
                 colang_content=config_dict.get("rails_colang", ""),
             )
             _rails_app = RunnableRails(config=rails_config)
@@ -208,7 +211,7 @@ async def _call_upstream(messages: list, request: ChatCompletionRequest) -> str:
                 "temperature": request.temperature,
                 "chat_template_kwargs": {"enable_thinking": False},
             },
-            headers={"Authorization": f"Bearer {settings.upstream_llm_api_key}"},
+            headers={"Authorization": f"Bearer {settings.resolved_api_key}"},
         )
         resp.raise_for_status()
         data = resp.json()
@@ -242,7 +245,7 @@ async def _call_upstream_stream(messages: list, request: ChatCompletionRequest):
                 "stream": True,
                 "chat_template_kwargs": {"enable_thinking": False},
             },
-            headers={"Authorization": f"Bearer {settings.upstream_llm_api_key}"},
+            headers={"Authorization": f"Bearer {settings.resolved_api_key}"},
         ) as resp:
             resp.raise_for_status()
             ctype = resp.headers.get("content-type", "")

@@ -71,10 +71,12 @@ def needs_domain_check(text: str, policy=None) -> bool:
             from .policies import load_active_policy as _load
             policy = _load()
         except Exception:
-            return False
+            # G-C5: fail-closed when policy missing
+            return True
     kws = [k for k in (policy.get("domain_keywords") or []) if isinstance(k, str)]
     if not kws:
-        return False
+        # G-C5: fail-closed when no keywords
+        return True
     norm = _norm(text)
     if len(norm.split()) <= 4:
         return False
