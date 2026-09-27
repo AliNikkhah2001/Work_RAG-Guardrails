@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -151,6 +152,28 @@ async def check_rails(request: RailCheckRequest) -> RailCheckResponse:
     )
 
 
+_CLEAN_PATTERNS = [
+    (re.compile(r"<unused\d+>"), ""),
+    (re.compile(r"<\|?tool_call\|?>"), ""),
+    (re.compile(r"<\|?tool_response\|?>"), ""),
+    (re.compile(r"tool_response\|>"), ""),
+    (re.compile(r"tool_call\|>"), ""),
+    (re.compile(r"\[multimodal\]"), ""),
+    (re.compile(r"<\|channel>thought.*?<channel\|>", re.DOTALL), ""),
+    (re.compile(r"<\|think\|>"), ""),
+    (re.compile(r"<\|turn>.*?<turn\|>", re.DOTALL), ""),
+    (re.compile(r"<bos>"), ""),
+    (re.compile(r"<eos>"), ""),
+    (re.compile(r"<\|?tool\|?>"), ""),
+    (re.compile(r"<\|\s*\"\s*\|>"), ""),  # <|"|>
+    (re.compile(r"<\|\s*'\s*\|>"), ""),
+    (re.compile(r"<\|[^>]*\|>"), ""),  # any <|...|>
+    (re.compile(r"[ \t]+"), " "),
+    (re.compile(r"\n[ \t]*\n[ \t]*\n+"), "\n\n"),
+    (re.compile(r"(?<!\n)\n(?!\n)"), " "),
+]
+
+
 def _clean_gemma_output(text: str) -> str:
     """Remove Gemma control/tool tokens that leak from llama.cpp.
 
@@ -158,31 +181,11 @@ def _clean_gemma_output(text: str) -> str:
     Proper fix is to update chat template / llama.cpp build, but filtering
     prevents user-facing leakage.
     """
-    import re
-
     if not text:
         return text
-    # Remove all known control tokens: <unusedXX>, <|tool_call|>, <|"|>, [multimodal], etc.
-    text = re.sub(r"<unused\d+>", "", text)
-    text = re.sub(r"<\|?tool_call\|?>", "", text)
-    text = re.sub(r"<\|?tool_response\|?>", "", text)
-    text = re.sub(r"tool_response\|>", "", text)
-    text = re.sub(r"tool_call\|>", "", text)
-    text = re.sub(r"\[multimodal\]", "", text)
-    text = re.sub(r"<\|channel>thought.*?<channel\|>", "", text, flags=re.DOTALL)
-    text = re.sub(r"<\|think\|>", "", text)
-    text = re.sub(r"<\|turn>.*?<turn\|>", "", text, flags=re.DOTALL)
-    text = re.sub(r"<bos>", "", text)
-    text = re.sub(r"<eos>", "", text)
-    text = re.sub(r"<\|?tool\|?>", "", text)
-    text = re.sub(r"<\|\s*\"\s*\|>", "", text)  # <|"|>
-    text = re.sub(r"<\|\s*'\s*\|>", "", text)
-    text = re.sub(r"<\|[^>]*\|>", "", text)  # any <|...|>
-    # Collapse horizontal whitespace but PRESERVE paragraph breaks.
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n[ \t]*\n[ \t]*\n+", "\n\n", text)
-    text = re.sub(r"(?<!\n)\n(?!\n)", " ", text).strip()
-    return text
+    for pat, repl in _CLEAN_PATTERNS:
+        text = pat.sub(repl, text)
+    return text.strip()
 
 
 async def _call_upstream(messages: list, request: ChatCompletionRequest) -> str:
