@@ -22,7 +22,7 @@ _MASKED = "[masked-pii]"
 
 def mask_text(text: str) -> str:
     t = re.sub(r"\b\d{10}\b", _MASKED, text)          # national id / phones
-    t = re.sub(r"\bIR\d{24}\b", _MASKED, text.upper() if False else t)
+    t = re.sub(r"\bIR\d{24}\b", _MASKED, t, flags=re.IGNORECASE)
     t = re.sub(r"\b09\d{9}\b", _MASKED, t)
     t = re.sub(r"\b0\d{10}\b", _MASKED, t)
     t = re.sub(r"sk-[A-Za-z0-9_\-]{8,}", _MASKED, t)
