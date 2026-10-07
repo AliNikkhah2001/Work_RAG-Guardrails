@@ -271,7 +271,8 @@ def _validate_sheba(sheba: str) -> bool:
 
 def check_pii_ir(text: str) -> Tuple[bool, str]:
     """Detect Iranian PII: national_id, Sheba, mobile/landline."""
-    # normalize digits (Persian/Arabic -> Latin already done)
+    # G-C3: normalize Persian digits (۰-۹ → 0-9) before matching
+    text = normalize_persian(text)
     if re.search(r"\b\d{10}\b", text):
         for m in re.finditer(r"\b\d{10}\b", text):
             if _validate_national_id(m.group()):
