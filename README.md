@@ -4,6 +4,21 @@ Persian-aware safety policy boundary and **guarded Gemma gateway** for the Work 
 
 > **Status:** ✅ **IMPLEMENTED AND LIVE** on Vast.ai (`vast-gemma4-migration`, commit `6ce319f`). Deterministic Persian rails + risk scoring + semantic interface (v2).
 
+<!-- docs-toc:start -->
+## Documentation Index
+
+> Auto-generated from this repository's tracked Markdown notes (**2** files). Refresh with `python scripts/gen_readme_toc.py` — the `docs-toc` workflow does this automatically on push.
+
+### `kb/`
+
+- [Guardrails KB — Persian sources](kb/README.md) — Embedded sources for NeMo input/output rails. All ensure_ascii=false JSON/TSV, loaded by actions.py.
+
+### `policies/`
+
+- [Business guardrail policies (versioned, git-backed)](policies/README.md) — Drop-in folder for business-specific guardrail prompts. Each policy is a YAML
+
+<!-- docs-toc:end -->
+
 ## 1. Summary
 
 Guardrails owns **policy enforcement** around the self-hosted Gemma generation service. In the MVP request path:
