@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # Upstream LLM (Gemma manager) — supports LLM_BASE_URL alias for Vast
     upstream_llm_base_url: str = "http://127.0.0.1:9000/v1"
     llm_base_url: str | None = None
-    upstream_llm_model: str = "gemma-4-31b"
+    upstream_llm_model: str = "gemma-4-31b-triton-trt"
     llm_model: str | None = None
     upstream_llm_api_key: str = "sk-local-dev"
     llm_api_key: str | None = None

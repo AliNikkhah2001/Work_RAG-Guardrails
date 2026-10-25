@@ -1,3 +1,4 @@
+colang_version: "1.0"
 models:
   - type: openai
     engine: openai

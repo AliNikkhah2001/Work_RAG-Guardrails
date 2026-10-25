@@ -1,25 +1,15 @@
-"""Guardrails service using NeMo Guardrails."""
+"""Guardrails service using NeMo Guardrails (deterministic fallback)."""
 
 from __future__ import annotations
 
 import logging
-import re
-from contextlib import asynccontextmanager
 from typing import Optional
 
 import httpx
-import json
-
-# Optional NeMo import - deterministic Persian rails (actions.py) work without it.
-# On hosts where nemoguardrails is installed (py<=3.13 / H200), full Colang rails load.
-try:
-    from nemoguardrails import RailsConfig
-    from nemoguardrails.integrations.langchain.runnable import RunnableRails
-    NEMO_AVAILABLE = True
-except ImportError:
-    RailsConfig = None
-    RunnableRails = None
-    NEMO_AVAILABLE = False
+import re
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 from .config import get_settings, load_nemo_config
 from .models import (
@@ -31,18 +21,34 @@ from .models import (
     HealthResponse,
     ReadyResponse,
 )
-from .actions import (
-    normalize_persian,
-    check_input_persian,
-    check_output_persian,
-)
+from .dashboard import register as register_dashboard
 
 log = logging.getLogger(__name__)
+
+try:
+    import nemoguardrails  # noqa: F401
+    NEMO_AVAILABLE = True
+except ImportError:
+    NEMO_AVAILABLE = False
 
 # Global state
 _rails_app = None
 _nemo_config_loaded: bool = False
 _upstream_reachable: bool = False
+
+@asynccontextmanager
+async def lifespan(app_instance: FastAPI):
+    """Lifespan: initialize rails on startup, cleanup on shutdown."""
+    global _rails_app, _nemo_config_loaded, _upstream_reachable
+    try:
+        await initialize_rails()
+    except Exception as e:
+        log.error("Failed to initialize rails in lifespan: %s", e)
+    yield
+
+
+# Create the FastAPI app once at module level so uvicorn --factory works.
+app = FastAPI(title="Work RAG Guardrails", version="mvp-1", lifespan=lifespan)
 
 
 async def check_upstream_health() -> bool:
@@ -61,17 +67,18 @@ async def check_upstream_health() -> bool:
 
 
 async def initialize_rails() -> None:
-    """Initialize NeMo Guardrails application (or deterministic-only fallback)."""
+    """Initialize NeMo Guardrails application (best-effort; deterministic fallback)."""
     global _rails_app, _nemo_config_loaded, _upstream_reachable
 
     settings = get_settings()
 
     if NEMO_AVAILABLE:
         try:
-            # Load NeMo configuration
             import yaml
+            from nemoguardrails import RailsConfig
+            from nemoguardrails.integrations.langchain.runnable import RunnableRails
+
             config_dict = load_nemo_config()
-            # G-C1: models is a list, RailsConfig expects YAML string
             yaml_content = yaml.safe_dump({"models": config_dict.get("models", [])}) if isinstance(config_dict.get("models"), list) else config_dict.get("models", "")
             rails_config = RailsConfig.from_content(
                 yaml_content=yaml_content,
@@ -85,12 +92,10 @@ async def initialize_rails() -> None:
             _nemo_config_loaded = False
     else:
         log.warning(
-            "nemoguardrails not installed - running deterministic Persian rails only "
-            "(kb/*.json via actions.py). Install nemoguardrails for full Colang flows."
+            "nemoguardrails not installed - running deterministic rails only"
         )
-        _nemo_config_loaded = True  # service is functional with deterministic rails
+        _nemo_config_loaded = True
 
-    # Check upstream
     _upstream_reachable = await check_upstream_health()
     if _upstream_reachable:
         log.info("Upstream Gemma manager is reachable")
@@ -99,15 +104,39 @@ async def initialize_rails() -> None:
 
 
 def get_rails_app():
-    """Get the initialized Rails app (None in deterministic-only mode)."""
+    """Get the initialized Rails app."""
     return _rails_app
 
 
-async def check_rails(request: RailCheckRequest) -> RailCheckResponse:
+def create_app():
+    """Create and return the FastAPI app (rails init via lifespan)."""
+    register_dashboard(app)
+    return app
+
+
+# ---- Routes ----
+
+@app.get("/health", response_model=HealthResponse)
+async def health():
+    return HealthResponse()
+
+
+@app.get("/ready", response_model=ReadyResponse)
+async def ready():
+    settings = get_settings()
+    return ReadyResponse(
+        status="ready" if _nemo_config_loaded else "not_ready",
+        nemo_config_loaded=_nemo_config_loaded,
+        upstream_reachable=_upstream_reachable,
+        policy_version=settings.policy_version,
+    )
+
+
+@app.post("/v1/rails/check", response_model=RailCheckResponse)
+async def check_rails(request: RailCheckRequest):
     """Signals → judge adjudication (NeMo second opinion), fail closed."""
     from .judge import adjudicate
     from . import events
-    import os as _os
 
     settings = get_settings()
     verdict = await adjudicate(request.text, stage=request.stage)
@@ -121,9 +150,6 @@ async def check_rails(request: RailCheckRequest) -> RailCheckResponse:
             request_id=request.request_id,
         )
     category = verdict.get("category", "")
-    # Response mode: production hides interception reason/level (premade
-    # message only); verbose/log-level keeps category + reason for debugging.
-    # Full detail always stays in server logs + dashboard events.
     if settings.guard_response_mode.strip().lower() == "verbose":
         msg_map = {
             "prompt_injection": "درخواست شما به عنوان تلاش برای دور زدن دستورات شناسایی شد.",
@@ -168,9 +194,8 @@ _CLEAN_PATTERNS = [
     (re.compile(r"<bos>"), ""),
     (re.compile(r"<eos>"), ""),
     (re.compile(r"<\|?tool\|?>"), ""),
-    (re.compile(r"<\|\s*\"\s*\|>"), ""),  # <|"|>
-    (re.compile(r"<\|\s*'\s*\|>"), ""),
-    (re.compile(r"<\|[^>]*\|>"), ""),  # any <|...|>
+    (re.compile(r'<\|?\"|\|>'), ""),
+    (re.compile(r"<\|?[^>]*\|>"), ""),
     (re.compile(r"[ \t]+"), " "),
     (re.compile(r"\n[ \t]*\n[ \t]*\n+"), "\n\n"),
     (re.compile(r"(?<!\n)\n(?!\n)"), " "),
@@ -178,12 +203,7 @@ _CLEAN_PATTERNS = [
 
 
 def _clean_gemma_output(text: str) -> str:
-    """Remove Gemma control/tool tokens that leak from llama.cpp.
-
-    Safety net for Gemma-4 UD-Q4_K_XL + llama.cpp b1 template mismatch.
-    Proper fix is to update chat template / llama.cpp build, but filtering
-    prevents user-facing leakage.
-    """
+    """Remove Gemma control/tool tokens that leak from llama.cpp."""
     if not text:
         return text
     for pat, repl in _CLEAN_PATTERNS:
@@ -219,103 +239,30 @@ async def _call_upstream(messages: list, request: ChatCompletionRequest) -> str:
         return _clean_gemma_output(raw)
 
 
-async def _call_upstream_stream(messages: list, request: ChatCompletionRequest):
-    """Yield raw content deltas from upstream with stream=true (real streaming, no added latency).
-
-    Upstream llama-server :18000 currently returns JSON even with stream:true (no SSE),
-    so we handle both: if SSE, stream deltas; if JSON, chunk the full content without sleep.
-    """
-    settings = get_settings()
-    async with httpx.AsyncClient(
-        timeout=httpx.Timeout(settings.upstream_read_timeout,
-                              connect=settings.upstream_connect_timeout,
-                              read=settings.upstream_read_timeout,
-                              write=settings.upstream_read_timeout,
-                              pool=settings.upstream_connect_timeout),
-        trust_env=False,
-    ) as client:
-        async with client.stream(
-            "POST",
-            settings.upstream_chat_url,
-            json={
-                "model": request.model,
-                "messages": messages,
-                "max_tokens": request.max_tokens or 4000,
-                "temperature": request.temperature,
-                "stream": True,
-                "chat_template_kwargs": {"enable_thinking": False},
-            },
-            headers={"Authorization": f"Bearer {settings.resolved_api_key}"},
-        ) as resp:
-            resp.raise_for_status()
-            ctype = resp.headers.get("content-type", "")
-            # Fallback: upstream returned buffered JSON (no SSE)
-            if "application/json" in ctype:
-                try:
-                    body = await resp.aread()
-                    data = json.loads(body)
-                    raw = data["choices"][0]["message"]["content"]
-                    raw = _clean_gemma_output(raw)
-                    # Chunk without artificial delay — still counts as streaming from guardrails perspective
-                    for tok in raw.split(" "):
-                        if tok:
-                            yield tok + " "
-                    return
-                except Exception as e:
-                    log.warning("Fallback JSON parse failed: %s", e)
-                    return
-            # Real SSE path
-            async for line in resp.aiter_lines():
-                if not line or not line.startswith("data:"):
-                    continue
-                payload = line[5:].strip()
-                if payload == "[DONE]":
-                    break
-                try:
-                    data = json.loads(payload)
-                    choices = data.get("choices", [])
-                    if not choices:
-                        continue
-                    delta = choices[0].get("delta", {})
-                    content = delta.get("content")
-                    if content:
-                        yield content
-                    if choices[0].get("finish_reason"):
-                        break
-                except Exception:
-                    continue
-
-
 async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionResponse:
-    """Run guarded chat completion via NeMo Guardrails -> upstream Gemma."""
+    """Run guarded chat completion via Guardrails -> upstream Gemma."""
     rails = get_rails_app()
     settings = get_settings()
 
-    # Extract user message (last user message in conversation)
     user_messages = [m for m in request.messages if m.get("role") == "user"]
     if not user_messages:
         raise ValueError("No user message in request")
 
     last_user_msg = user_messages[-1]["content"]
-    # For RAG, orchestrator sends augmented prompt "[Context...]\n\nQuestion: <original>"
-    # Check only original user query to avoid KB context poisoning (injection FP on "نقش")
     input_text = last_user_msg
     if "Question:" in last_user_msg:
-        # Take text after last Question: (original query)
         input_text = last_user_msg.split("Question:")[-1].strip()
-        # Fallback to full if empty
         if not input_text:
             input_text = last_user_msg
     elif "سوال:" in last_user_msg:
         input_text = last_user_msg.split("سوال:")[-1].strip() or last_user_msg
 
-    # 1. Input rail check
+    # Input rail check (signals → judge, fail closed)
     input_check = await check_rails(
         RailCheckRequest(stage="input", text=input_text)
     )
     if not input_check.allowed:
-        # Return refusal response
-        refusal_msg = input_check.reason or "I cannot comply with that request."
+        refusal_msg = input_check.reason or "I cannot process that request."
         return ChatCompletionResponse(
             model=request.model,
             choices=[
@@ -327,27 +274,22 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
             ],
         )
 
-    # 2. Call upstream Gemma via NeMo (which handles output rails), or direct in
-    # deterministic-only mode (nemoguardrails not installed on this host).
+    # Call upstream Gemma via NeMo (which handles output rails), or direct
     try:
-        # Prepare messages for upstream
         upstream_messages = [
             {"role": m["role"], "content": m["content"]} for m in request.messages
         ]
 
         if rails is not None:
-            # Call NeMo which will run output rails after generation
             result = await rails.generate_async(messages=upstream_messages)
             bot_response = result.get("content", "") if isinstance(result, dict) else str(result)
         else:
-            # Direct upstream call - output checked by check_output_persian below
             bot_response = await _call_upstream(upstream_messages, request)
 
-        # Safety: if cleaning left empty (model only emitted control tokens), provide grounded fallback
         if not bot_response or not bot_response.strip():
             bot_response = "متأسفم، مدل پاسخ مناسبی تولید نکرد. بر اساس منابع بازیابی‌شده، لطفاً سوال را واضح‌تر بپرسید."
 
-        # 3. Output rail check (signals → judge, fail closed)
+        # Output rail check (signals → judge, fail closed)
         output_check = await check_rails(
             RailCheckRequest(stage="output", text=bot_response)
         )
@@ -363,7 +305,7 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
                     )
                 ],
             )
-        # PII mask-and-continue: redact sensitive spans, still answer.
+
         from .actions import check_pii_ir
         from . import events as _events
         try:
@@ -401,24 +343,9 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
                 )
             ],
         )
-    except httpx.ConnectError:
-        log.error("Upstream connection failed")
-        return ChatCompletionResponse(
-            model=request.model,
-            choices=[
-                ChatCompletionChoice(
-                    index=0,
-                    message={
-                        "role": "assistant",
-                        "content": "Unable to reach the model service. Please try again later.",
-                    },
-                    finish_reason="length",
-                )
-            ],
-        )
+
     except Exception as e:
-        log.error("Guarded completion failed: %s", e)
-        # Fail closed - don't expose internal errors
+        log.exception("Upstream error")
         return ChatCompletionResponse(
             model=request.model,
             choices=[
@@ -426,143 +353,122 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
                     index=0,
                     message={
                         "role": "assistant",
-                        "content": "An error occurred while processing your request.",
+                        "content": f"Upstream error: {str(e)[:200]}",
                     },
-                    finish_reason="length",
+                    finish_reason="error",
                 )
             ],
         )
 
 
-async def guarded_completion_stream(request: ChatCompletionRequest):
-    """Streaming version — input rail checked, then real upstream tokens yielded as SSE."""
-    # Extract user message for input rail (same as guarded_completion)
+@app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
+async def chat_completions(request: ChatCompletionRequest):
+    """OpenAI-compatible chat completion with input/output guardrails."""
+    return await guarded_completion(request)
+
+
+async def _call_upstream_stream(messages: list, request: ChatCompletionRequest):
+    """Streamed direct OpenAI-compatible call to upstream Gemma manager."""
+    settings = get_settings()
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(settings.upstream_read_timeout,
+                              connect=settings.upstream_connect_timeout,
+                              read=settings.upstream_read_timeout,
+                              write=settings.upstream_read_timeout,
+                              pool=settings.upstream_connect_timeout),
+        trust_env=False,
+    ) as client:
+        async with client.stream(
+            "POST",
+            settings.upstream_chat_url,
+            json={
+                "model": request.model,
+                "messages": messages,
+                "max_tokens": request.max_tokens or 4000,
+                "temperature": request.temperature,
+                "chat_template_kwargs": {"enable_thinking": False},
+                "stream": True,
+            },
+            headers={"Authorization": f"Bearer {settings.resolved_api_key}"},
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if line.startswith("data: "):
+                    payload = line[6:].strip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        import json
+                        data = json.loads(payload)
+                        delta = data.get("choices", [{}])[0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            yield content
+                    except Exception:
+                        continue
+
+
+@app.post("/v1/chat/completions/stream")
+async def chat_completions_stream(request: ChatCompletionRequest):
+    """Streamed guarded completion."""
+    from fastapi.responses import StreamingResponse
+
+    rails = get_rails_app()
+    settings = get_settings()
+
     user_messages = [m for m in request.messages if m.get("role") == "user"]
     if not user_messages:
-        raise ValueError("No user message")
+        raise ValueError("No user message in request")
+
     last_user_msg = user_messages[-1]["content"]
     input_text = last_user_msg
     if "Question:" in last_user_msg:
-        input_text = last_user_msg.split("Question:")[-1].strip() or last_user_msg
+        input_text = last_user_msg.split("Question:")[-1].strip()
+        if not input_text:
+            input_text = last_user_msg
     elif "سوال:" in last_user_msg:
         input_text = last_user_msg.split("سوال:")[-1].strip() or last_user_msg
 
-    input_check = await check_rails(RailCheckRequest(stage="input", text=input_text))
-    if not input_check.allowed:
-        # Stream refusal as single chunk
-        refusal = input_check.reason or "I cannot comply."
-        yield f"data: {json.dumps({'choices':[{'delta':{'content': refusal},'finish_reason':'content_filter'}]}, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
-        return
-
-    upstream_messages = [{"role": m["role"], "content": m["content"]} for m in request.messages]
-    # If NeMo rails loaded, we can't true-stream through NeMo (generate_async is buffered)
-    # So in NEMO mode we fall back to buffered then chunk; else real stream
-    rails = get_rails_app()
-    if rails is not None:
-        # Buffered fallback: call non-streaming then yield chunks without artificial delay
-        # Still faster than fake streaming with sleep, but not token-by-token from LLM
-        result = await rails.generate_async(messages=upstream_messages)
-        bot_response = result.get("content", "") if isinstance(result, dict) else str(result)
-        bot_response = _clean_gemma_output(bot_response)
-        # Output rail check after full
-        output_check = await check_rails(RailCheckRequest(stage="output", text=bot_response))
-        if not output_check.allowed:
-            bot_response = output_check.reason or "I cannot provide that response."
-            yield f"data: {json.dumps({'choices':[{'delta':{'content': bot_response},'finish_reason':'content_filter'}]}, ensure_ascii=False)}\n\n"
-            yield "data: [DONE]\n\n"
-            return
-        # Yield without sleep — real generation already done, just chunk
-        for tok in bot_response.split(" "):
-            yield f"data: {json.dumps({'choices':[{'delta':{'content': tok+' '}}]}, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
-        return
-
-    # Deterministic mode: real upstream streaming (no added latency)
-    async for content in _call_upstream_stream(upstream_messages, request):
-        # Optionally light clean per token
-        # we don't sleep — tokens arrive as fast as LLM generates (~30-50ms)
-        yield f"data: {json.dumps({'choices':[{'delta':{'content': content}}]}, ensure_ascii=False)}\n\n"
-    yield "data: [DONE]\n\n"
-
-
-@asynccontextmanager
-async def lifespan(app):
-    """Application lifespan handler."""
-    log.info("Starting Guardrails service...")
-    await initialize_rails()
-    yield
-    log.info("Shutting down Guardrails service...")
-
-
-def create_app():
-    """Create FastAPI application."""
-    from fastapi import FastAPI, HTTPException, Request
-    from fastapi.responses import JSONResponse, StreamingResponse
-    from .dashboard import register as register_dashboard
-
-    app = FastAPI(
-        title="Work RAG Guardrails",
-        version="0.1.0",
-        lifespan=lifespan,
+    # Input rail check (signals → judge, fail closed)
+    input_check = await check_rails(
+        RailCheckRequest(stage="input", text=input_text)
     )
+    if not input_check.allowed:
+        refusal_msg = input_check.reason or "I cannot process that request."
+        async def refusal_stream():
+            yield refusal_msg
+        return StreamingResponse(refusal_stream(), media_type="text/plain")
 
-    @app.get("/health", response_model=HealthResponse)
-    async def health():
-        return HealthResponse(status="ok")
+    async def content_stream():
+        try:
+            upstream_messages = [
+                {"role": m["role"], "content": m["content"]} for m in request.messages
+            ]
 
-    @app.get("/ready", response_model=ReadyResponse)
-    async def ready():
-        global _upstream_reachable
-        _upstream_reachable = await check_upstream_health()
-        return ReadyResponse(
-            status="ready" if _nemo_config_loaded and _upstream_reachable else "not_ready",
-            nemo_config_loaded=_nemo_config_loaded,
-            upstream_reachable=_upstream_reachable,
-        )
+            if rails is not None:
+                result = await rails.generate_async(messages=upstream_messages)
+                bot_response = result.get("content", "") if isinstance(result, dict) else str(result)
+                yield bot_response
+            else:
+                async for chunk in _call_upstream_stream(upstream_messages, request):
+                    yield chunk
 
-    @app.post("/v1/rails/check", response_model=RailCheckResponse)
-    async def rails_check(request: RailCheckRequest):
-        if not _nemo_config_loaded:
-            raise HTTPException(status_code=503, detail="NeMo configuration not loaded")
-        return await check_rails(request)
+        except httpx.TimeoutException:
+            log.error("Upstream timeout")
+            yield "The model request timed out. Please try again."
+        except Exception as e:
+            log.exception("Upstream error")
+            yield f"Upstream error: {str(e)[:200]}"
 
-    @app.post("/v1/chat/completions")
-    async def chat_completions(request: ChatCompletionRequest):
-        if not _nemo_config_loaded:
-            raise HTTPException(status_code=503, detail="NeMo configuration not loaded")
-        if not _upstream_reachable:
-            raise HTTPException(status_code=503, detail="Upstream model not reachable")
-        if request.stream:
-            return StreamingResponse(
-                guarded_completion_stream(request),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-            )
-        return await guarded_completion(request)
-
-    @app.exception_handler(Exception)
-    async def global_exception_handler(request: Request, exc: Exception):
-        log.exception("Unhandled exception: %s", exc)
-        return JSONResponse(
-            status_code=500,
-            content={"detail": "Internal server error"},
-        )
-
-    register_dashboard(app)  # /dashboard + /dashboard/api/* (same :8200)
-
-    return app
+    return StreamingResponse(content_stream(), media_type="text/plain")
 
 
 def main():
-    """Entry point for running the service."""
+    """Entry point for running the service directly."""
     import uvicorn
-
     settings = get_settings()
     uvicorn.run(
-        "work_rag_guardrails.api:create_app",
-        factory=True,
+        app,
         host=settings.guardrails_host,
         port=settings.guardrails_port,
-        log_level="info",
     )
