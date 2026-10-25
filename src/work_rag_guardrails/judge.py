@@ -499,7 +499,7 @@ async def adjudicate(text: str, stage: str = "input") -> Dict[str, Any]:
     """
     signals = collect_signals(text, stage)
     try:
-        if needs_domain_check(text):
+        if stage == "input" and needs_domain_check(text):
             signals.append({"detector": "domain", "category": "out_of_domain",
                             "matched": "no-in-domain-keywords",
                             "context": text[:120]})

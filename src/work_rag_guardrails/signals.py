@@ -78,6 +78,12 @@ def needs_domain_check(text: str, policy=None) -> bool:
         # G-C5: fail-closed when no keywords
         return True
     norm = _norm(text)
-    if len(norm.split()) <= 4:
+    smalltalk = {
+        "سلام", "درود", "ممنون", "مرسی", "تشکر", "خداحافظ",
+        "hello", "hi", "hey", "thanks", "thank", "bye", "goodbye", "ok", "okay",
+        "شخصی", "شرکتی", "حقیقی", "حقوقی", "عمومی", "بله", "خیر",
+        "هیچکدام", "هیچ کدوم", "هیچ‌کدام", "هیچ‌کدوم",
+    }
+    if norm.strip() in smalltalk:
         return False
     return not any(_norm(k) in norm for k in kws if len(_norm(k)) > 1)
