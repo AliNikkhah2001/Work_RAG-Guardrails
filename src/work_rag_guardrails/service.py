@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Optional
 
 import httpx
@@ -120,6 +121,26 @@ def create_app():
 
 # ---- Routes ----
 
+# Premade user-facing refusal message per signal category (production mode).
+# Boundary-setting, informative, and free of internal detector details —
+# "production" mode must never leak verdict reasons, but it should still tell
+# the user WHICH class of violation triggered the refusal and what to do next.
+_CATEGORY_PREMADE = {
+    "prompt_injection": "این دستیار برای پاسخ به سوالات مشتریان طراحی شده و به تلاش‌ها برای تغییر یا نادیده گرفتن دستورات آن واکنش نشان نمی‌دهد. لطفاً پرسش خود را درباره اعتبارسنجی و گزارش اعتباری بپرسید.",
+    "jailbreak": "متأسفم، محدودیت‌های اساسی دستیار تغییرپذیر نیست. لطفاً پرسش خود را در حوزه اعتبارسنجی و گزارش اعتباری مطرح کنید.",
+    "hate": "محتوای پیام شما حاوی توهین یا زبان آزاردهنده است. لطفاً با لحن محترمانه دوباره بپرسید.",
+    "offense": "پیام شما حاوی الفاظ نامناسب است. لطفاً با لحن محترمانه دوباره بپرسید.",
+    "profanity": "پیام شما حاوی الفاظ نامناسب است. لطفاً با لحن محترمانه دوباره بپرسید.",
+    "out_of_scope": "من دستیار هوشمند شرکت اعتبارسنجی ایران هستم و فقط به سوالات مربوط به اعتبارسنجی، گزارش و امتیاز اعتباری (چک و تسهیلات بانکی) پاسخ می‌دهم. لطفاً پرسش خود را در همین حوزه مطرح کنید.",
+    "pii": "برای حفاظت از حریم خصوصی شما، نیازی به ارسال اطلاعات شخصی (مانند کد ملی یا شماره حساب) نیست. لطفاً پرسش را بدون درج اطلاعات شخصی مطرح کنید.",
+    "secret": "نمی‌توانم این اطلاعات را ارائه دهم.",
+    "policy": "درخواست شما با سیاست‌های دستیار مغایرت دارد.",
+    "nemo": "درخواست شما توسط بازبینی امنیتی مسدود شد.",
+}
+
+# Categories whose OUTPUT-stage refusals should blame the answer, not the user.
+_OUTPUT_REDIRECT = {"hate", "offense", "profanity"}
+
 @app.get("/health", response_model=HealthResponse)
 async def health():
     return HealthResponse()
@@ -153,22 +174,22 @@ async def check_rails(request: RailCheckRequest):
             reason=None, policy_version=settings.policy_version,
             request_id=request.request_id,
         )
-    category = verdict.get("category", "")
-    if settings.guard_response_mode.strip().lower() == "verbose":
-        msg_map = {
-            "prompt_injection": "درخواست شما به عنوان تلاش برای دور زدن دستورات شناسایی شد.",
-            "jailbreak": "درخواست شما به عنوان تلاش برای دور زدن محدودیت‌ها شناسایی شد.",
-            "hate": "محتوای شما حاوی زبان آزاردهنده است و قابل پردازش نیست.",
-            "offense": "محتوای شما حاوی الفاظ نامناسب است.",
-            "out_of_scope": "این دستیار فقط در حوزه اعتبارسنجی و گزارش اعتباری (ICS) پاسخ می‌دهد.",
-            "profanity": "محتوای شما حاوی الفاظ نامناسب است.",
-            "pii": "محتوای شما حاوی اطلاعات شخصی است.",
-            "secret": "نمی‌توانم این اطلاعات را ارائه دهم.",
-            "policy": "درخواست شما با سیاست‌های دستیار مغایرت دارد.",
-            "nemo": "درخواست شما توسط بازبینی امنیتی مسدود شد.",
-        }
+    # Normalize verdict categories to the premade-message keys: verdicts may
+    # carry policy ids with hyphens ("out-of-domain") — `-` → `_`, plus
+    # aliases for policy/judge naming variants below.
+    _CATEGORY_ALIASES = {
+        "out_of_domain": "out_of_scope",
+        "off_domain": "out_of_scope",
+        "irrelevant": "out_of_scope",
+        "irrelevant_to_corpus": "out_of_scope",
+    }
+    category = (verdict.get("category", "") or "").strip().replace("-", "_")
+    category = _CATEGORY_ALIASES.get(category, category)
+    mode = settings.guard_response_mode.strip().lower()
+    if mode == "verbose":
+        msg_map = _CATEGORY_PREMADE
         base = msg_map.get(category, "درخواست شما مسدود شد.")
-        if request.stage == "output" and category in ("hate", "offense", "profanity"):
+        if request.stage == "output" and category in _OUTPUT_REDIRECT:
             base = "پاسخ حاوی محتوای نامناسب است."
         return RailCheckResponse(
             allowed=False, action="refuse", categories=[category or "policy"],
@@ -176,10 +197,15 @@ async def check_rails(request: RailCheckRequest):
             policy_version=settings.policy_version,
             request_id=request.request_id,
         )
-    premade = (settings.refusal_message
-               or "متأسفم، نمی‌توانم به این درخواست پاسخ دهم.")
+    # Production mode: premade message for the detected class — internal
+    # interception details are not leaked, but the user sees which boundary was hit.
+    premade = _CATEGORY_PREMADE.get(category, "") or (
+        settings.refusal_message
+        or "متأسفم، نمی‌توانم به این درخواست پاسخ دهم.")
+    if request.stage == "output" and category in _OUTPUT_REDIRECT:
+        premade = "پاسخ حاوی محتوای نامناسب است و قابل ارائه نیست."
     return RailCheckResponse(
-        allowed=False, action="refuse", categories=["policy_violation"],
+        allowed=False, action="refuse", categories=[category or "policy"],
         reason=premade, policy_version=settings.policy_version,
         request_id=request.request_id,
     )
@@ -213,6 +239,47 @@ def _clean_gemma_output(text: str) -> str:
     for pat, repl in _CLEAN_PATTERNS:
         text = pat.sub(repl, text)
     return text.strip()
+
+
+# The TRT-LLM upstream has max_seq_len 8192 — long WebUI threads overflow it
+# and arrive here as httpx 400. Trim history (keep newest turns + truncated
+# system prompt) to a conservative char budget (~4.5 chars/token for Persian;
+# 25k chars ≈ 5.5k input tokens + 2k output < 8192).
+_UPSTREAM_CHAR_BUDGET = int(os.getenv("GUARD_UPSTREAM_CHAR_BUDGET", "22000"))
+_UPSTREAM_SYSTEM_CHAR_CAP = 3000
+
+# RailCheckRequest.text is capped at 10000 chars (models.py) — never feed it a
+# context-augmented user message whole; rails only need the question portion.
+_RAIL_TEXT_CAP = 9999
+
+_UPSTREAM_ERROR_TEXT = (
+    "متأسفم در فراخوانی مدل مشکلی پیش آمد. لطفاً مکالمه را کوتاه‌تر کنید و دوباره تلاش کنید."
+)
+
+
+def _fit_upstream_messages(messages: list) -> list:
+    """Trim message history so the upstream prompt fits the context window."""
+    budget = _UPSTREAM_CHAR_BUDGET
+    fitted: list = []
+    for m in messages:
+        if m.get("role") == "system":
+            content = str(m.get("content", ""))[:_UPSTREAM_SYSTEM_CHAR_CAP]
+            fitted.append({"role": "system", "content": content})
+            budget -= len(content)
+    # Walk newest → oldest, keep as many turns as the remaining budget allows.
+    kept: list = []
+    for m in reversed([m for m in messages if m.get("role") != "system"]):
+        if budget <= 0:
+            break
+        content = str(m.get("content", ""))
+        if len(content) > budget:
+            # Newest turn keeps its tail (the question sits at the end),
+            # older turns keep their head.
+            content = content[-budget:] if not kept else content[:budget]
+        kept.append({"role": m.get("role", "user"), "content": content})
+        budget -= len(content)
+    kept.reverse()
+    return fitted + kept
 
 
 async def _call_upstream(messages: list, request: ChatCompletionRequest) -> str:
@@ -263,7 +330,7 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
 
     # Input rail check (signals → judge, fail closed)
     input_check = await check_rails(
-        RailCheckRequest(stage="input", text=input_text)
+        RailCheckRequest(stage="input", text=input_text[:_RAIL_TEXT_CAP])
     )
     if not input_check.allowed:
         refusal_msg = input_check.reason or "I cannot process that request."
@@ -283,6 +350,7 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
         upstream_messages = [
             {"role": m["role"], "content": m["content"]} for m in request.messages
         ]
+        upstream_messages = _fit_upstream_messages(upstream_messages)
 
         if rails is not None:
             result = await rails.generate_async(messages=upstream_messages)
@@ -341,7 +409,7 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
                     index=0,
                     message={
                         "role": "assistant",
-                        "content": "The model request timed out. Please try again.",
+                        "content": _UPSTREAM_ERROR_TEXT,
                     },
                     finish_reason="length",
                 )
@@ -357,9 +425,16 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
                     index=0,
                     message={
                         "role": "assistant",
-                        "content": f"Upstream error: {str(e)[:200]}",
+                        # No internals leaked to the caller (400 bodies contain
+                        # token-budget details); callers only need to retry.
+                        "content": _UPSTREAM_ERROR_TEXT,
                     },
-                    finish_reason="error",
+                    # NOTE: ChatCompletionChoice.finish_reason is a Literal of
+                    # stop/length/content_filter — "error" crashed pydantic
+                    # validation and turned every upstream failure into a bare
+                    # HTTP 500. "length" is the closest valid value (upstream
+                    # context overflow arrives as httpx.HTTPStatusError here).
+                    finish_reason="length",
                 )
             ],
         )
@@ -378,7 +453,7 @@ async def guarded_completion_stream(request: ChatCompletionRequest):
     elif "سوال:" in last_user_msg:
         input_text = last_user_msg.split("سوال:")[-1].strip() or last_user_msg
 
-    input_check = await check_rails(RailCheckRequest(stage="input", text=input_text))
+    input_check = await check_rails(RailCheckRequest(stage="input", text=input_text[:_RAIL_TEXT_CAP]))
     if not input_check.allowed:
         # Stream refusal as single chunk
         refusal = input_check.reason or "I cannot comply."
@@ -387,6 +462,7 @@ async def guarded_completion_stream(request: ChatCompletionRequest):
         return
 
     upstream_messages = [{"role": m["role"], "content": m["content"]} for m in request.messages]
+    upstream_messages = _fit_upstream_messages(upstream_messages)
     # If NeMo rails loaded, we can't true-stream through NeMo (generate_async is buffered)
     # So in NEMO mode we fall back to buffered then chunk; else real stream
     rails = get_rails_app()
@@ -519,7 +595,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
 
     # Input rail check (signals → judge, fail closed)
     input_check = await check_rails(
-        RailCheckRequest(stage="input", text=input_text)
+        RailCheckRequest(stage="input", text=input_text[:_RAIL_TEXT_CAP])
     )
     if not input_check.allowed:
         refusal_msg = input_check.reason or "I cannot process that request."
@@ -532,6 +608,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
             upstream_messages = [
                 {"role": m["role"], "content": m["content"]} for m in request.messages
             ]
+            upstream_messages = _fit_upstream_messages(upstream_messages)
 
             if rails is not None:
                 result = await rails.generate_async(messages=upstream_messages)
@@ -543,10 +620,10 @@ async def chat_completions_stream(request: ChatCompletionRequest):
 
         except httpx.TimeoutException:
             log.error("Upstream timeout")
-            yield "The model request timed out. Please try again."
+            yield _UPSTREAM_ERROR_TEXT
         except Exception as e:
             log.exception("Upstream error")
-            yield f"Upstream error: {str(e)[:200]}"
+            yield _UPSTREAM_ERROR_TEXT
 
     return StreamingResponse(content_stream(), media_type="text/plain")
 

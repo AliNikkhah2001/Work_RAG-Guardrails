@@ -140,16 +140,35 @@ _PERSIAN_INJECTION_REGEXES = [
     re.compile(r"هوش مصنوعی بدون.*محدودیت"),
 ]
 
+_ENGLISH_INJECTION_REGEXES = [
+    re.compile(r"\bignore\s+(all\s+)?(previous|prior|earlier|above)\s+(instructions?|prompts?)\b", re.I),
+    re.compile(r"\bdisregard\s+(all\s+)?(previous|prior|earlier|above|your)\s+(instructions?|prompts?)\b", re.I),
+    re.compile(r"\b(reveal|show|print|disclose|leak|expose)\s+(your\s+|the\s+|its\s+)?(system\s+)?(prompt|instructions?|rules?)\b", re.I),
+    re.compile(r"\byou\s+are\s+now\s+(a|an| DAN)\b", re.I),
+    re.compile(r"\bdeveloper\s+mode\b", re.I),
+]
+
 def check_prompt_injection_fa(text: str) -> Tuple[bool, str]:
     """Return (blocked, reason). Checks kb/prompt_injection_fa.json + spec regexes + English fallback."""
     norm = normalize_persian(text)
+    txt_lower = text.lower()
     for entry in load_injection_patterns():
         pat = normalize_persian(entry["pattern"])
         if pat and pat in norm:
             return True, f"injection:{entry['id']}"
+        # English translations of the same attack classes ("ignore previous
+        # instructions" etc.) — real users/phishing kits send both.
+        en = str(entry.get("en", "")).lower().strip()
+        if en and en in txt_lower:
+            return True, f"injection:{entry['id']}:en"
     for rx in _PERSIAN_INJECTION_REGEXES:
         if rx.search(norm):
             return True, f"injection:regex:{rx.pattern[:20]}"
+    # English regex fallbacks cover phrasings the KB `en` field lacks
+    # ("ignore ALL previous instructions" is not a contiguous substring).
+    for rx in _ENGLISH_INJECTION_REGEXES:
+        if rx.search(text):
+            return True, f"injection:en-regex:{rx.pattern[:24]}"
     # regex fallbacks for obfuscation (base64-like, hex)
     if re.search(r"[A-Za-z0-9+/]{40,}={0,2}", text) and "base64" in norm:
         return True, "injection:encoding-base64"
