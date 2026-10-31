@@ -4,6 +4,52 @@ Persian-aware safety policy boundary and **guarded Gemma gateway** for the Work 
 
 > **Status:** ✅ **IMPLEMENTED AND LIVE** on Vast.ai (`vast-gemma4-migration`, commit `6ce319f`). Deterministic Persian rails + risk scoring + semantic interface (v2).
 
+## 🗂 Code Hierarchy & File Diagram
+
+```mermaid
+graph TD
+    ROOT[guardrails/]
+    ROOT --> README[README.md]
+    ROOT --> DOCKER[Dockerfile]
+    ROOT --> PYPROJ[pyproject.toml]
+    ROOT --> ENV[.env.example]
+    ROOT --> SRC[src/work_rag_guardrails/]
+    SRC --> API[api.py]
+    SRC --> SVC[service.py]
+    SRC --> CONFIG[config.py]
+    SRC --> JUDGE[judge.py]
+    SRC --> ACTIONS[actions.py]
+    SRC --> SIGNALS[signals.py]
+    SRC --> EVENTS[events.py]
+    SRC --> MODELS[models.py]
+    SRC --> DASH[dashboard.py]
+    SRC --> OBS[observability.py]
+    SRC --> POLICIES[policies.py]
+    SRC --> SEM[semantic/]
+    SEM --> HATE[hate.py]
+    SEM --> TOX[toxicity.py]
+    SEM --> INTENT[intent.py]
+    SRC --> RISK[risk/]
+    RISK --> SCORER[scorer.py]
+    ROOT --> CONFIGDIR[config/]
+    CONFIGDIR --> CFG[config.yml]
+    CONFIGDIR --> RAILS[rails.co]
+    ROOT --> KB[kb/]
+    KB --> HURTLEX[hurtlex_*.json/tsv]
+    KB --> PERSIAN[persian_swear_*.json]
+    KB --> INJECTION[prompt_injection_fa.json]
+    KB --> SCOPE[out_of_scope.json]
+    ROOT --> POLICIESDIR[policies/]
+    POLICIESDIR --> ACTIVE[active.yaml]
+    POLICIESDIR --> ICS[ics-credit-v1.0.0.yaml]
+    ROOT --> TESTS[tests/]
+    TESTS --> T1[test_input_rails.py]
+    TESTS --> T2[test_hurtlex_allowlist.py]
+    ROOT --> SCRIPTS[scripts/gen_readme_toc.py]
+
+classDef root fill:#e1f5e1,stroke:#2e7d32,stroke-width:2px
+class ROOT root
+
 <!-- docs-toc:start -->
 ## Documentation Index
 
