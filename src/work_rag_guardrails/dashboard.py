@@ -144,12 +144,13 @@ refresh();setInterval(()=>{CDN--;document.getElementById('count').textContent=CD
 
 
 def render_page() -> str:
-    from .judge import judge_mode, nemo_mode
+    from .judge import judge_mode, selfcheck_mode
     pol = load_active_policy()
     page = PAGE
     page = page.replace("__POLICY__", html.escape(f"{pol.get('id','-')} v{pol.get('version','-')}"))
     page = page.replace("__MODE__", html.escape(judge_mode()))
-    # nemo mode shown via meta line below (kept static-safe: no braces used)
+    # self-check mode shown via meta line below (kept static-safe: no braces used)
+    _ = selfcheck_mode()
     return page
 
 

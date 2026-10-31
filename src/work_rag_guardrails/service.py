@@ -1,4 +1,10 @@
-"""Guardrails service using NeMo Guardrails (deterministic fallback)."""
+"""Guardrails service: deterministic signals + LLM judge (NeMo removed).
+
+nemoguardrails was dropped: it pins langchain-core internals that conflict
+with the installed stack and its init failed on every start. The rails are
+now deterministic signals + policy/LLM judge + direct-LLM self-check
+(see judge.py) — same fail-closed behavior, one less dependency.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +19,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from .config import get_settings, load_nemo_config
+from .config import get_settings
 from .models import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -27,21 +33,17 @@ from .dashboard import register as register_dashboard
 
 log = logging.getLogger(__name__)
 
-try:
-    import nemoguardrails  # noqa: F401
-    NEMO_AVAILABLE = True
-except ImportError:
-    NEMO_AVAILABLE = False
-
 # Global state
+# _rails_app stays None forever: the NeMo rails path was removed. All call
+# sites fall back to the direct upstream path (with history trimming).
 _rails_app = None
-_nemo_config_loaded: bool = False
+_rails_ready: bool = True  # deterministic signals + LLM judge are always available
 _upstream_reachable: bool = False
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
     """Lifespan: initialize rails on startup, cleanup on shutdown."""
-    global _rails_app, _nemo_config_loaded, _upstream_reachable
+    global _upstream_reachable
     try:
         await initialize_rails()
     except Exception as e:
@@ -69,37 +71,14 @@ async def check_upstream_health() -> bool:
 
 
 async def initialize_rails() -> None:
-    """Initialize NeMo Guardrails application (best-effort; deterministic fallback)."""
-    global _rails_app, _nemo_config_loaded, _upstream_reachable
+    """Warm up the rails subsystem (NeMo removed — signals + LLM judge need no init)."""
+    global _upstream_reachable
 
-    settings = get_settings()
-
-    if NEMO_AVAILABLE:
-        try:
-            import yaml
-            from nemoguardrails import RailsConfig
-            from nemoguardrails.integrations.langchain.runnable import RunnableRails
-
-            config_dict = load_nemo_config()
-            yaml_content = yaml.safe_dump({"models": config_dict.get("models", [])}) if isinstance(config_dict.get("models"), list) else config_dict.get("models", "")
-            rails_config = RailsConfig.from_content(
-                yaml_content=yaml_content,
-                colang_content=config_dict.get("rails_colang", ""),
-            )
-            _rails_app = RunnableRails(config=rails_config)
-            _nemo_config_loaded = True
-            log.info("NeMo Guardrails configuration loaded successfully")
-        except Exception as e:
-            log.warning(
-                "NeMo Guardrails unavailable (%s) - running deterministic rails only", e
-            )
-            _rails_app = None
-            _nemo_config_loaded = True
-    else:
-        log.warning(
-            "nemoguardrails not installed - running deterministic rails only"
-        )
-        _nemo_config_loaded = True
+    # deterministic signals load lazily; a prefetch keeps first-request latency low
+    try:
+        from .judge import collect_signals  # noqa: F401
+    except Exception as e:
+        log.warning("signals prefetch failed: %s", e)
 
     _upstream_reachable = await check_upstream_health()
     if _upstream_reachable:
@@ -150,8 +129,8 @@ async def health():
 async def ready():
     settings = get_settings()
     return ReadyResponse(
-        status="ready" if _nemo_config_loaded else "not_ready",
-        nemo_config_loaded=_nemo_config_loaded,
+        status="ready" if _rails_ready else "not_ready",
+        nemo_config_loaded=_rails_ready,  # field kept for API compat (NeMo removed)
         upstream_reachable=_upstream_reachable,
         policy_version=settings.policy_version,
     )
