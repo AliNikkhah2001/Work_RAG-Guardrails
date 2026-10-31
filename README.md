@@ -71,7 +71,7 @@ Guardrails owns **policy enforcement** around the self-hosted Gemma generation s
 
 Provides:
 - Deterministic input/output checks before retrieval and generation
-- NeMo Guardrails configuration with auditable Colang policy set
+- Deterministic signals + LLM judge self-check (NeMo Guardrails removed)
 - OpenAI-compatible chat gateway that calls Gemma :18000
 - Structured decisions and stable refusal responses
 - Health and readiness endpoints
@@ -81,7 +81,7 @@ Provides:
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/health` | Process health |
-| `GET` | `/ready` | NeMo config + upstream Gemma readiness |
+| `GET` | `/ready` | Deterministic signals + LLM judge + upstream Gemma readiness |
 | `POST` | `/v1/rails/check` | Run named input or output policy stage |
 | `POST` | `/v1/chat/completions` | OpenAI-compatible guarded Gemma generation |
 
