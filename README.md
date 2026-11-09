@@ -359,3 +359,18 @@ curl -s 'http://127.0.0.1:8200/dashboard/api/stats'
 - [Parent README](../README.md)
 
 Guardrails does not own retrieval, conversation orchestration, the frontend, or model serving. Only Guardrails calls the Gemma manager in the MVP path.
+
+<!-- docs-toc:start -->
+## Documentation Index
+
+> Auto-generated from this repository's tracked Markdown notes (**2** files). Refresh with `python scripts/gen_readme_toc.py` — the `docs-toc` workflow does this automatically on push.
+
+### `kb/`
+
+- [Guardrails KB — Persian sources](kb/README.md) — Embedded sources for NeMo input/output rails. All ensure_ascii=false JSON/TSV, loaded by actions.py.
+
+### `policies/`
+
+- [Business guardrail policies (versioned, git-backed)](policies/README.md) — Drop-in folder for business-specific guardrail prompts. Each policy is a YAML
+
+<!-- docs-toc:end -->
