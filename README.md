@@ -19,7 +19,26 @@ Guardrails owns **policy enforcement** around the self-hosted Gemma generation s
 
 **Design goal:** fail closed — if the policy engine errors or times out, the request is refused rather than passed through.
 
-### Architecture (current production code)
+### Caption: Guardrails position in the platform — high-level black box
+
+![Guardrails position in the platform](images/architecture-platform.svg)
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
+
+```mermaid
+flowchart LR
+    ORCH["Orchestrator :8100"]
+    GR["Guardrails :8200\nsignals + direct-LLM judge\nnemoguardrails removed"]
+    GE["Gemma\n:18000 Vast / :9000 H200"]
+    ORCH -->|1 POST /v1/rails/check| GR
+    GR -->|2 POST /v1/chat/completions| GE
+    GE -->|generated text| GR
+    GR -->|3 output rails + PII mask| ORCH
+```
+</details>
+
+### Caption: Guardrails position in the platform — detailed technical
 
 ![Guardrails position in the platform](images/architecture-platform.svg)
 
@@ -30,18 +49,51 @@ Guardrails owns **policy enforcement** around the self-hosted Gemma generation s
 flowchart LR
     ORCH["Orchestrator :8100"]
     GR["Guardrails :8200"]
-    JUDGE["Direct-LLM judge\nsignals -> policy -> self-check"]
+    CHECK["input rail\nPOST /v1/rails/check\nstage=input"]
+    SIG["collect_signals\ninjection · jailbreak · hate\n· offense · scope · pii"]
+    JUDGE["policy judge\ngemma · mizan · hybrid"]
+    SELF["direct-LLM self-check\nYes / No\nnemoguardrails REMOVED"]
+    FC["fail closed\non error / timeout"]
+    CHAT["POST /v1/chat/completions\nOpenAI-compatible guarded Gemma"]
     GE["Gemma\n:18000 Vast / :9000 H200"]
-    ORCH -->|"1 POST /v1/rails/check (input)"| GR
-    GR -->|judge decides| JUDGE
-    JUDGE -.->|evidence + verdict| GR
-    GR -->|"2 POST /v1/chat/completions"| GE
-    GE -->|generated text| GR
-    GR -->|"3 output rails + PII mask"| ORCH
+    OSIG["output rails\nPII-IR · secret · profanity · hate"]
+    MASK["mask-and-continue\n[masked-pii]"]
+    HB["hard block\n(secret)"]
+    ORCH -->|1 input text| CHECK
+    CHECK --> SIG
+    SIG --> JUDGE
+    JUDGE --> SELF
+    SELF -->|allow| CHAT
+    SELF -->|block| FC
+    JUDGE -->|error| FC
+    CHAT --> GE
+    GE -->|raw text| OSIG
+    OSIG -->|secret| HB
+    OSIG -->|valid PII| MASK
+    OSIG -->|clean| ORCH
+    HB -->|refuse| ORCH
+    MASK -->|masked text| ORCH
 ```
 </details>
 
-### Internal pipeline (adjudicate)
+### Caption: Internal pipeline (adjudicate) — high-level black box
+
+![Internal pipeline: signals -> judge -> self-check -> output rails](images/internal-pipeline.svg)
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
+
+```mermaid
+flowchart TD
+    IN[input text]
+    PIPE[signals → judge → self-check\ndirect-LLM, nemoguardrails removed]
+    OUT[decision: allow / refuse]
+    IN --> PIPE
+    PIPE --> OUT
+```
+</details>
+
+### Caption: Internal pipeline (adjudicate) — detailed technical
 
 ![Internal pipeline: signals -> judge -> self-check -> output rails](images/internal-pipeline.svg)
 
@@ -52,23 +104,44 @@ flowchart LR
 flowchart TD
     IN[input text] --> NORM[normalize_persian]
     NORM --> SIG[collect_signals\ninjection · jailbreak · hurtlex\n· profanity · scope · pii]
-    SIG --> JUDGE[LLM judge\ngemma policy · mizan · hybrid]
-    JUDGE --> SELF[direct-LLM self-check\nYes / No]
-    SELF -->|allow| ALLOW[allow -> generation]
-    SELF -->|block| REF[refuse — fail closed]
+    SIG --> DOMAIN[needs_domain_check\nout_of_domain signal]
+    DOMAIN --> JUDGE[policy judge\ngemma · mizan · hybrid]
+    JUDGE --> SELF[direct-LLM self-check\nYes / No\nfail closed on error]
+    SELF -->|allow| ALLOW[allow → generation]
+    SELF -->|block| REF[refuse]
     JUDGE -->|block| REF
-    JUDGE -->|error/timeout| FC[fail closed]
-    ALLOW --> GEN[Gemma output]
-    subgraph OUTPUT[output rails after generation]
-    GEN --> OSIG[output signals\nPII-IR · secret · profanity · hurtlex]
+    subgraph OUTRAILS[output rails after generation]
+    GEN[Gemma output] --> OSIG[output signals\nPII-IR · secret · profanity · hate]
     OSIG -->|secret| HB[hard block]
-    OSIG -->|valid PII| MASK["mask-and-continue [masked-pii]"]
-    OSIG -->|clean| OUT[allow -> user]
+    OSIG -->|valid PII| MASK[mask-and-continue [masked-pii]]
+    OSIG -->|clean| OUT[allow → user]
     end
 ```
 </details>
 
-### Code hierarchy
+### Caption: Code hierarchy — high-level black box
+
+![Component file tree](images/code-hierarchy.svg)
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
+
+```mermaid
+graph TD
+    ROOT[guardrails/]
+    ROOT --> SRC[src/work_rag_guardrails/]
+    ROOT --> CFG[config/]
+    ROOT --> KB[kb/]
+    ROOT --> POL[policies/]
+    ROOT --> TESTS[tests/]
+    SRC --> API[api.py]
+    SRC --> SVC[service.py]
+    SRC --> JUDGE[judge.py]
+    SRC --> SIG[signals.py]
+```
+</details>
+
+### Caption: Code hierarchy — detailed technical
 
 ![Component file tree](images/code-hierarchy.svg)
 
