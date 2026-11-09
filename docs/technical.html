@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dana — Work RAG Guardrails Technical Detail</title>
+<link rel="stylesheet" href="style.css">
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });
+</script>
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <div class="brand">
+      <div class="logo">Dana<span>.</span></div>
+      <div class="site-title">Work RAG Guardrails</div>
+    </div>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+      <a href="high-level.html">High-Level Detail</a>
+      <a href="technical.html" class="active">Technical Detail</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="page-header">
+    <h1>In-Depth Technical Detail</h1>
+    <p>Full mermaid diagrams, detailed pipeline stages, running instructions, verification commands, and changelog.</p>
+  </div>
+
+  <section>
+    <h2>1. Architecture platform — detailed technical</h2>
+    <div class="diagram">
+      <img src="images/architecture-platform.svg" alt="Guardrails position in the platform — detailed technical" style="max-width:100%; height:auto;">
+      <div class="mermaid">
+flowchart LR
+    ORCH["Orchestrator :8100"]
+    GR["Guardrails :8200"]
+    CHECK["input rail<br>POST /v1/rails/check<br>stage=input"]
+    SIG["collect_signals<br>injection · jailbreak · hate<br>· offense · scope · pii"]
+    JUDGE["policy judge<br>gemma · mizan · hybrid"]
+    SELF["direct-LLM self-check<br>Yes / No<br>nemoguardrails REMOVED"]
+    FC["fail closed<br>on error / timeout"]
+    CHAT["POST /v1/chat/completions<br>OpenAI-compatible guarded Gemma"]
+    GE["Gemma<br>:18000 Vast / :9000 H200"]
+    OSIG["output rails<br>PII-IR · secret · profanity · hate"]
+    MASK["mask-and-continue<br>[masked-pii]"]
+    HB["hard block<br>(secret)"]
+    ORCH -->|1 input text| CHECK
+    CHECK --> SIG
+    SIG --> JUDGE
+    JUDGE --> SELF
+    SELF -->|allow| CHAT
+    SELF -->|block| FC
+    JUDGE -->|error| FC
+    CHAT --> GE
+    GE -->|raw text| OSIG
+    OSIG -->|secret| HB
+    OSIG -->|valid PII| MASK
+    OSIG -->|clean| ORCH
+    HB -->|refuse| ORCH
+    MASK -->|masked text| ORCH
+      </div>
+      <details class="mermaid-source">
+        <summary>Diagram source (Mermaid)</summary>
+        <pre><code>flowchart LR
+    ORCH["Orchestrator :8100"]
+    GR["Guardrails :8200"]
+    CHECK["input rail\nPOST /v1/rails/check\nstage=input"]
+    SIG["collect_signals\ninjection · jailbreak · hate\n· offense · scope · pii"]
+    JUDGE["policy judge\ngemma · mizan · hybrid"]
+    SELF["direct-LLM self-check\nYes / No\nnemoguardrails REMOVED"]
+    FC["fail closed\non error / timeout"]
+    CHAT["POST /v1/chat/completions\nOpenAI-compatible guarded Gemma"]
+    GE["Gemma\n:18000 Vast / :9000 H200"]
+    OSIG["output rails\nPII-IR · secret · profanity · hate"]
+    MASK["mask-and-continue\n[masked-pii]"]
+    HB["hard block\n(secret)"]
+    ORCH -->|1 input text| CHECK
+    CHECK --> SIG
+    SIG --> JUDGE
+    JUDGE --> SELF
+    SELF -->|allow| CHAT
+    SELF -->|block| FC
+    JUDGE -->|error| FC
+    CHAT --> GE
+    GE -->|raw text| OSIG
+    OSIG -->|secret| HB
+    OSIG -->|valid PII| MASK
+    OSIG -->|clean| ORCH
+    HB -->|refuse| ORCH
+    MASK -->|masked text| ORCH</code></pre>
+      </details>
+    </div>
+    <div class="captions">
+      <h4>Diagram terms — every element explained</h4>
+      <ul>
+        <li><strong>ORCH — Orchestrator :8100:</strong> The Work RAG Orchestrator service that coordinates the request and sends the input text to Guardrails.</li>
+        <li><strong>GR — Guardrails :8200:</strong> The guardrails service enforcing policy. nemoguardrails/NeMo is removed and not executed.</li>
+        <li><strong>CHECK — input rail POST /v1/rails/check stage=input:</strong> The entry point where the orchestrator asks Guardrails to check the input text before retrieval.</li>
+        <li><strong>SIG — collect_signals:</strong> Deterministic detectors emit evidence signals: injection, jailbreak, hate, offense, scope, PII. Evidence only — they do not block directly (except secret downstream).</li>
+        <li><strong>JUDGE — policy judge gemma · mizan · hybrid:</strong> The LLM-backed policy judge. Backend selected by <code>GUARD_JUDGE_BACKEND</code> (gemma default, mizan, or hybrid).</li>
+        <li><strong>SELF — direct-LLM self-check Yes / No nemoguardrails REMOVED:</strong> One direct-LLM Yes/No call acting as a second opinion after the policy judge. NeMo self-check flows are gone.</li>
+        <li><strong>FC — fail closed on error / timeout:</strong> If the judge errors or times out, the request is refused rather than passed through.</li>
+        <li><strong>CHAT — POST /v1/chat/completions OpenAI-compatible guarded Gemma:</strong> The guarded generation endpoint that calls upstream Gemma and returns an OpenAI-compatible response.</li>
+        <li><strong>GE — Gemma :18000 Vast / :9000 H200:</strong> The upstream Gemma model, at <code>:18000</code> on Vast.ai or <code>:9000</code> on the H200 manager.</li>
+        <li><strong>OSIG — output rails PII-IR · secret · profanity · hate:</strong> Deterministic output detectors run on the generated text before it reaches the user.</li>
+        <li><strong>MASK — mask-and-continue [masked-pii]:</strong> Valid PII is masked in place and the (masked) answer is returned to the user.</li>
+        <li><strong>HB — hard block (secret):</strong> Secret markers (<code>sk-</code>, <code>api_key</code>, <code>database_url</code>, <code>Bearer </code>) trigger a hard refusal.</li>
+        <li><strong>Arrow 1 input text (ORCH → CHECK):</strong> Raw input enters the input rail check.</li>
+        <li><strong>CHECK → SIG:</strong> The input is run through deterministic signal collection.</li>
+        <li><strong>SIG → JUDGE:</strong> Collected signals are handed to the policy judge as evidence.</li>
+        <li><strong>JUDGE → SELF:</strong> The judge's verdict goes to the direct-LLM self-check as a second opinion.</li>
+        <li><strong>SELF →|allow| CHAT:</strong> On allow, generation proceeds to the guarded chat endpoint.</li>
+        <li><strong>SELF →|block| FC:</strong> On a self-check block, fail closed — refuse.</li>
+        <li><strong>JUDGE →|error| FC:</strong> On judge error, fail closed — refuse.</li>
+        <li><strong>CHAT → GE:</strong> Guardrails calls upstream Gemma to generate.</li>
+        <li><strong>GE →|raw text| OSIG:</strong> Raw generated text is fed into output rails.</li>
+        <li><strong>OSIG →|secret| HB:</strong> Secret content in output → hard block.</li>
+        <li><strong>OSIG →|valid PII| MASK:</strong> Valid PII → mask-and-continue.</li>
+        <li><strong>OSIG →|clean| ORCH:</strong> Clean output → returned to orchestrator/user.</li>
+        <li><strong>HB →|refuse| ORCH:</strong> Hard block → refusal returned to orchestrator.</li>
+        <li><strong>MASK →|masked text| ORCH:</strong> Masked text → returned to orchestrator/user.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Internal pipeline (adjudicate) — detailed technical</h2>
+    <div class="diagram">
+      <img src="images/internal-pipeline.svg" alt="Internal pipeline: signals -> judge -> self-check -> output rails — detailed technical" style="max-width:100%; height:auto;">
+      <div class="mermaid">
+flowchart TD
+    IN[input text] --> NORM[normalize_persian]
+    NORM --> SIG[collect_signals<br>injection · jailbreak · hurtlex<br>· profanity · scope · pii]
+    SIG --> DOMAIN[needs_domain_check<br>out_of_domain signal]
+    DOMAIN --> JUDGE[policy judge<br>gemma · mizan · hybrid]
+    JUDGE --> SELF[direct-LLM self-check<br>Yes / No<br>fail closed on error]
+    SELF -->|allow| ALLOW[allow → generation]
+    SELF -->|block| REF[refuse]
+    JUDGE -->|block| REF
+    subgraph OUTRAILS[output rails after generation]
+    GEN[Gemma output] --> OSIG[output signals<br>PII-IR · secret · profanity · hate]
+    OSIG -->|secret| HB[hard block]
+    OSIG -->|valid PII| MASK[mask-and-continue [masked-pii]]
+    OSIG -->|clean| OUT[allow → user]
+    end
+      </div>
+      <details class="mermaid-source">
+        <summary>Diagram source (Mermaid)</summary>
+        <pre><code>flowchart TD
+    IN[input text] --> NORM[normalize_persian]
+    NORM --> SIG[collect_signals\ninjection · jailbreak · hurtlex\n· profanity · scope · pii]
+    SIG --> DOMAIN[needs_domain_check\nout_of_domain signal]
+    DOMAIN --> JUDGE[policy judge\ngemma · mizan · hybrid]
+    JUDGE --> SELF[direct-LLM self-check\nYes / No\nfail closed on error]
+    SELF -->|allow| ALLOW[allow → generation]
+    SELF -->|block| REF[refuse]
+    JUDGE -->|block| REF
+    subgraph OUTRAILS[output rails after generation]
+    GEN[Gemma output] --> OSIG[output signals\nPII-IR · secret · profanity · hate]
+    OSIG -->|secret| HB[hard block]
+    OSIG -->|valid PII| MASK[mask-and-continue [masked-pii]]
+    OSIG -->|clean| OUT[allow → user]
+    end</code></pre>
+      </details>
+    </div>
+    <div class="captions">
+      <h4>Diagram terms — every element explained</h4>
+      <ul>
+        <li><strong>IN — input text:</strong> The raw user query entering the pipeline.</li>
+        <li><strong>NORM — normalize_persian:</strong> Persian normalization: Arabic→Persian char mapping (<code>ي→ی</code>, <code>ك→ک</code>, <code>ة→ه</code>, alef variants→<code>a</code>), ZWNJ/diacritic/tatweel strip, Persian/Arabic digit→ASCII, whitespace collapse. Identical to KB-manager preprocessing.</li>
+        <li><strong>SIG — collect_signals injection · jailbreak · hurtlex · profanity · scope · pii:</strong> Deterministic detectors emit evidence (not verdicts): prompt injection, jailbreak, HurtLex hate, profanity, out-of-scope, PII.</li>
+        <li><strong>DOMAIN — needs_domain_check out_of_domain signal:</strong> Fast no-LLM pre-check; long text with zero in-domain keywords earns an <code>out_of_domain</code> signal using <code>domain_keywords</code>.</li>
+        <li><strong>JUDGE — policy judge gemma · mizan · hybrid:</strong> The LLM policy judge weighing signals against pinned-policy categories. Backend per <code>GUARD_JUDGE_BACKEND</code>.</li>
+        <li><strong>SELF — direct-LLM self-check Yes / No fail closed on error:</strong> One direct-LLM Yes/No call as a second opinion; fails closed (refuses) on error.</li>
+        <li><strong>ALLOW — allow → generation:</strong> The input passes all checks; generation proceeds.</li>
+        <li><strong>REF — refuse:</strong> The request is refused (premade refusal, <code>finish_reason="content_filter"</code>).</li>
+        <li><strong>SELF →|block| REF / JUDGE →|block| REF:</strong> Either the self-check or the judge can block → refuse.</li>
+        <li><strong>OUTRAILS — output rails after generation (subgraph):</strong> The output-side safety stage applied to Gemma's generated text before it reaches the user.</li>
+        <li><strong>GEN — Gemma output:</strong> Raw text produced by the upstream Gemma model.</li>
+        <li><strong>OSIG — output signals PII-IR · secret · profanity · hate:</strong> Deterministic output detectors: PII-IR (national-id mod-11, Sheba/IR-IBAN mod-97, mobile/landline), secret markers, profanity, HurtLex hate.</li>
+        <li><strong>HB — hard block:</strong> Secret content in output → hard refusal.</li>
+        <li><strong>MASK — mask-and-continue [masked-pii]:</strong> Valid PII → masked in place and answer returned.</li>
+        <li><strong>OUT — allow → user:</strong> Clean output → returned to the user.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Code hierarchy — detailed technical</h2>
+    <div class="diagram">
+      <img src="images/code-hierarchy.svg" alt="Component file tree — detailed technical" style="max-width:100%; height:auto;">
+      <div class="mermaid">
+graph TD
+    ROOT[guardrails/]
+    ROOT --> README[README.md]
+    ROOT --> DOCKER[Dockerfile]
+    ROOT --> PYPROJ[pyproject.toml]
+    ROOT --> ENV[.env.example]
+    ROOT --> IMG[images/]
+    ROOT --> SRC[src/work_rag_guardrails/]
+    SRC --> API[api.py]
+    SRC --> SVC[service.py]
+    SRC --> JUDGE[judge.py]
+    SRC --> ACTIONS[actions.py]
+    SRC --> SIGNALS[signals.py]
+    SRC --> EVENTS[events.py]
+    SRC --> MODELS[models.py]
+    SRC --> DASH[dashboard.py]
+    SRC --> OBS[observability.py]
+    SRC --> POLICIES[policies.py]
+    SRC --> RISK[risk/scorer.py]
+    SRC --> SEM[semantic/]
+    SEM --> HATE[hate.py]
+    SEM --> TOX[toxicity.py]
+    SEM --> INTENT[intent.py]
+    ROOT --> CFG[config/]
+    CFG --> YML[config.yml]
+    CFG --> CO[rails.co]
+    ROOT --> KB[kb/]
+    KB --> HURTLEX[hurtlex_*.json/tsv]
+    KB --> PERSIAN[persian_swear_*.json]
+    KB --> INJECTION[prompt_injection_fa.json]
+    KB --> SCOPE[out_of_scope.json]
+    ROOT --> POL[policies/]
+    POL --> ACTIVE[active.yaml]
+    POL --> ICS[ics-credit-v1.0.0.yaml]
+    ROOT --> TESTS[tests/]
+      </div>
+      <details class="mermaid-source">
+        <summary>Diagram source (Mermaid)</summary>
+        <pre><code>graph TD
+    ROOT[guardrails/]
+    ROOT --> README[README.md]
+    ROOT --> DOCKER[Dockerfile]
+    ROOT --> PYPROJ[pyproject.toml]
+    ROOT --> ENV[.env.example]
+    ROOT --> IMG[images/]
+    ROOT --> SRC[src/work_rag_guardrails/]
+    SRC --> API[api.py]
+    SRC --> SVC[service.py]
+    SRC --> JUDGE[judge.py]
+    SRC --> ACTIONS[actions.py]
+    SRC --> SIGNALS[signals.py]
+    SRC --> EVENTS[events.py]
+    SRC --> MODELS[models.py]
+    SRC --> DASH[dashboard.py]
+    SRC --> OBS[observability.py]
+    SRC --> POLICIES[policies.py]
+    SRC --> RISK[risk/scorer.py]
+    SRC --> SEM[semantic/]
+    SEM --> HATE[hate.py]
+    SEM --> TOX[toxicity.py]
+    SEM --> INTENT[intent.py]
+    ROOT --> CFG[config/]
+    CFG --> YML[config.yml]
+    CFG --> CO[rails.co]
+    ROOT --> KB[kb/]
+    KB --> HURTLEX[hurtlex_*.json/tsv]
+    KB --> PERSIAN[persian_swear_*.json]
+    KB --> INJECTION[prompt_injection_fa.json]
+    KB --> SCOPE[out_of_scope.json]
+    ROOT --> POL[policies/]
+    POL --> ACTIVE[active.yaml]
+    POL --> ICS[ics-credit-v1.0.0.yaml]
+    ROOT --> TESTS[tests/]</code></pre>
+      </details>
+    </div>
+    <div class="captions">
+      <h4>Diagram terms — every element explained</h4>
+      <ul>
+        <li><strong>ROOT — guardrails/:</strong> Component root.</li>
+        <li><strong>README.md:</strong> Component documentation.</li>
+        <li><strong>Dockerfile:</strong> Container build definition.</li>
+        <li><strong>pyproject.toml:</strong> Python project metadata and dependencies (<code>work-rag-guardrails</code> 0.1.0, Python &gt;=3.11).</li>
+        <li><strong>.env.example:</strong> Environment variable template.</li>
+        <li><strong>images/:</strong> Diagram assets.</li>
+        <li><strong>SRC — src/work_rag_guardrails/:</strong> Python package.</li>
+        <li><strong>api.py:</strong> FastAPI app (<code>create_app</code> factory) exposing <code>/health</code>, <code>/ready</code>, <code>/v1/rails/check</code>, <code>/v1/chat/completions</code>, dashboard routes.</li>
+        <li><strong>service.py:</strong> Pipeline orchestration (adjudicate: signals → judge → self-check → decision).</li>
+        <li><strong>judge.py:</strong> LLM policy judge (gemma/mizan/hybrid backends).</li>
+        <li><strong>actions.py:</strong> Rail actions (allow, refuse, mask, hard block).</li>
+        <li><strong>signals.py:</strong> Deterministic detectors (injection, jailbreak, HurtLex, profanity, scope, PII).</li>
+        <li><strong>events.py:</strong> Decision event logging (PII masked).</li>
+        <li><strong>models.py:</strong> Pydantic request/response models.</li>
+        <li><strong>dashboard.py:</strong> Persian dashboard on <code>:8200</code>.</li>
+        <li><strong>observability.py:</strong> Observability / masked sample viewer.</li>
+        <li><strong>policies.py:</strong> Business policy store loading.</li>
+        <li><strong>risk/scorer.py:</strong> Risk scoring.</li>
+        <li><strong>semantic/:</strong> Semantic detectors — <code>hate.py</code>, <code>toxicity.py</code>, <code>intent.py</code>.</li>
+        <li><strong>CFG — config/:</strong> Legacy NeMo configs (<code>config.yml</code>, <code>rails.co</code>) — not loaded at runtime.</li>
+        <li><strong>KB — kb/:</strong> Safety knowledge base — HurtLex lists, Persian swear lists, prompt-injection patterns (<code>prompt_injection_fa.json</code>), out-of-scope (<code>out_of_scope.json</code>).</li>
+        <li><strong>POL — policies/:</strong> Versioned business policy prompts — <code>active.yaml</code> pin + <code>ics-credit-v1.0.0.yaml</code>.</li>
+        <li><strong>TESTS — tests/:</strong> Pytest suite.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. Pipeline stages — detailed</h2>
+
+    <h3>Input rail check (<code>stage=input</code>)</h3>
+    <ol>
+      <li><code>normalize_persian()</code> — Arabic→Persian char mapping (<code>ي→ی</code>, <code>ك→ک</code>, <code>ة→ه</code>, alef variants→<code>a</code>), ZWNJ/diacritic/tatweel strip, Persian/Arabic digit→ASCII, whitespace collapse (identical to KB-manager preprocessing).</li>
+      <li><code>collect_signals()</code> — injection, jailbreak, HurtLex hate, profanity, out-of-scope — evidence only.</li>
+      <li>Domain pre-check (<code>needs_domain_check</code>) — long text with zero in-domain keywords earns an <code>out_of_domain</code> signal.</li>
+      <li>Policy judge (per <code>GUARD_JUDGE_BACKEND</code>/mode) — pinned-policy categories via LLM; <code>clean-no-signals</code> skips the judge.</li>
+      <li>Direct-LLM self-check (one Yes/No call) — tie-break/dissent handling; policy judge overrules a lone self-check block when signals were clean.</li>
+      <li>Fail closed on any error or timeout.</li>
+    </ol>
+
+    <h3>Output rail check (<code>stage=output</code>)</h3>
+    <ol>
+      <li>Deterministic signals: profanity, HurtLex hate, PII-IR (national-id mod-11, Sheba/IR-IBAN mod-97, mobile/landline).</li>
+      <li><code>secret</code> markers (<code>sk-</code>, <code>api_key</code>, <code>database_url</code>, <code>Bearer </code>) — hard block.</li>
+      <li>Valid PII → mask-and-continue (<code>[masked-pii]</code>); otherwise answer.</li>
+      <li>Fail closed on any error or timeout.</li>
+    </ol>
+
+    <h3>Judge modes &amp; backends</h3>
+    <p><code>GUARD_JUDGE_BACKEND</code>:</p>
+    <ul>
+      <li><strong>gemma</strong> (default) — pinned-policy categories judged by Gemma LLM calls; <code>VERDICT: allow|block</code> + <code>CATEGORY: &lt;id&gt;</code> parsing; fail closed on unparseable/error.</li>
+      <li><strong>mizan</strong> — Mizan System-1 API (via Manager <code>:9000</code>) returning safety/scope/severity answers.</li>
+      <li><strong>hybrid</strong> — Mizan first, escalate to Gemma on low confidence or hard signals (<code>prompt_injection</code>, <code>jailbreak</code>, <code>secret</code>, <code>pii</code>, <code>hate</code>, <code>offense</code>, <code>profanity</code>).</li>
+    </ul>
+    <p><code>GUARD_JUDGE_MODE</code>:</p>
+    <ul>
+      <li><strong>on-signal</strong> (default): clean texts (no signals) skip the judge entirely.</li>
+      <li><strong>always</strong>: judge every text.</li>
+    </ul>
+    <p>The direct-LLM self-check (<code>GUARD_NEMO_SELFCHECK</code>) runs after the policy judge as a second opinion; <code>shadow</code> logs only, <code>off</code> skips it.</p>
+
+    <h3>Classification taxonomy</h3>
+    <p><code>prompt_injection</code> · <code>jailbreak</code> · <code>hate</code> · <code>offense</code>/profanity · <code>pii</code> · <code>out_of_scope</code>/out-of-domain · <code>secret</code> · <code>policy</code> (business) · <code>engine_error</code>. Reports prefer the deterministic signal category when the judge blocks generically (insult → <code>hate</code>, not <code>out-of-domain</code>).</p>
+  </section>
+
+  <section>
+    <h2>5. Business policy store (<code>policies/</code>)</h2>
+    <p>Git-backed versioned prompts: <code>policies/&lt;domain&gt;-v&lt;semver&gt;.yaml</code>, enforced version pinned in <code>policies/active.yaml</code>. Current: <code>ics-credit-v1.0.0</code> (out-of-domain incl. company/people as in-domain; ungrounded-advice). Schema: <code>id/version/stage/categories</code> with <code>prompt</code> (<code>{{text}}</code>/<code>{{signals}}</code>), <code>refusal</code>, <code>examples</code>, plus <code>domain_keywords</code> for the fast no-LLM out-of-domain pre-check. Ship new versions by adding a file + moving the pin — never edit released versions.</p>
+  </section>
+
+  <section>
+    <h2>6. HurtLex Persian allowlist (28 lemmas)</h2>
+    <p>Allowlisted for both input and output HurtLex checks on exact-word match to prevent false positives on legitimate credit terminology. Profanity/PII/secret remain strict and are <strong>not</strong> allowlisted. File: <code>kb/hurtlex_allowlist.json</code>.</p>
+    <table>
+      <thead>
+        <tr><th>Lemma</th><th>Domain</th><th>Evidence</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>حذف</td><td>Credit</td><td><code>درخواست حذف سابقه منفی قدیمی</code></td></tr>
+        <tr><td>بخشی</td><td>Credit</td><td><code>بخشی از اطلاعات</code></td></tr>
+        <tr><td>تأمین مالی</td><td>Credit</td><td>Core term <code>تسهیلات بانکی</code></td></tr>
+        <tr><td>اشتغال</td><td>Credit</td><td><code>اشتغال و سابقه بیمه</code></td></tr>
+        <tr><td>پست</td><td>Credit</td><td><code>پست سازمانی</code></td></tr>
+        <tr><td>مصرف</td><td>Credit</td><td><code>گزارش‌های مصرف</code></td></tr>
+        <tr><td>هدف</td><td>Credit</td><td><code>هدف از دریافت تسهیلات</code></td></tr>
+        <tr><td>نادرست</td><td>Credit</td><td><code>اطلاعات نادرست را اصلاح</code></td></tr>
+        <tr><td>پستی</td><td>Credit</td><td>KB chunk, polite greeting</td></tr>
+        <tr><td>مهم</td><td>Credit</td><td><code>مهم است</code> flagged on <code>جدول نوع تماس</code></td></tr>
+        <tr><td>ضعیف</td><td>Credit</td><td>6 answers with <code>رتبه ضعیف</code></td></tr>
+        <tr><td>خسته</td><td>Social</td><td><code>خسته نباشید</code> greeting</td></tr>
+        <tr><td>شرح</td><td>Credit</td><td><code>شرح</code> = description in reports</td></tr>
+        <tr><td>دسته</td><td>Credit</td><td><code>دسته‌بندی</code> = category</td></tr>
+        <tr><td>جزئی</td><td>Credit</td><td><code>جزئی</code> = partial/minor</td></tr>
+        <tr><td>ناشی</td><td>Credit</td><td><code>ناشی از</code> = resulting from</td></tr>
+        <tr><td>خوشحال</td><td>Social</td><td>Positive sentiment</td></tr>
+        <tr><td>سخت</td><td>General</td><td><code>سخت</code> = difficult</td></tr>
+        <tr><td>پلیس</td><td>Credit</td><td><code>سوابق پلیس</code> credit data source</td></tr>
+        <tr><td>بچه</td><td>General</td><td><code>بچه کجاست؟</code> birthplace — kid/child</td></tr>
+        <tr><td>گروه</td><td>Business</td><td><code>گروه/گروه‌بندی</code> — group</td></tr>
+        <tr><td>مردم</td><td>General</td><td><code>مردم</code> — people</td></tr>
+        <tr><td>دختر</td><td>General</td><td>Girl/daughter</td></tr>
+        <tr><td>خانم</td><td>General</td><td>Ms./lady title</td></tr>
+        <tr><td>پوست</td><td>General</td><td>Skin</td></tr>
+        <tr><td>قوم</td><td>General</td><td>Ethnicity noun (single-word trigger can't see targeting)</td></tr>
+        <tr><td>روستایی</td><td>General</td><td>Rural demographic term</td></tr>
+        <tr><td>قشر</td><td>General</td><td>Stratum/class</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>7. Running locally</h2>
+    <pre><code>cd components/guardrails
+cp .env.example .env
+pip install -e ".[dev]"
+PYTHONPATH=./src \
+GUARDRAILS_HOST=0.0.0.0 GUARDRAILS_PORT=8200 \
+UPSTREAM_LLM_BASE_URL=http://127.0.0.1:18000/v1 \
+UPSTREAM_LLM_MODEL=unsloth/gemma-4-31B-it-GGUF:UD-Q4_K_XL \
+python -m uvicorn work_rag_guardrails.api:create_app --factory --host 0.0.0.0 --port 8200
+</code></pre>
+    <p>Or via the console script: <code>guardrails</code>. Or with Docker: <code>docker build -t work-rag-guardrails . && docker run -p 8200:8200 work-rag-guardrails</code>.</p>
+    <h3>Tests</h3>
+    <pre><code>cd components/guardrails
+PYTHONPATH=./src python -m pytest tests/ -v
+</code></pre>
+  </section>
+
+  <section>
+    <h2>8. Verification</h2>
+    <pre><code># Health / readiness
+curl -s http://127.0.0.1:8200/health
+curl -s http://127.0.0.1:8200/ready
+
+# Input allowed (was blocked before allowlist)
+curl -s http://127.0.0.1:8200/v1/rails/check -H 'Content-Type: application/json' \
+  -d '{"stage":"input","text":"درخواست حذف سابقه منفی قدیمی از گزارش اعتباری","request_id":"t"}'
+
+# Output blocked for true hate
+curl -s http://127.0.0.1:8200/v1/rails/check -H 'Content-Type: application/json' \
+  -d '{"stage":"output","text":"این فرد حرامزاده است","request_id":"t"}'
+
+# Dashboard stats
+curl -s 'http://127.0.0.1:8200/dashboard/api/stats'
+</code></pre>
+  </section>
+
+  <section>
+    <h2>9. Changelog (version summary)</h2>
+    <ul>
+      <li><strong>v2 (current)</strong> — <code>nemoguardrails</code> removed. Deterministic signals (<code>signals.py</code>) + direct-LLM judge self-check (<code>judge.py</code>), fail closed. <code>adjudicate()</code> = signals → policy judge (gemma/mizan/hybrid) → self-check → decision. <code>secret</code> hard block; PII mask-and-continue on output. Gemma called directly (<code>:18000</code> Vast / <code>:9000</code> H200).</li>
+      <li><strong>v1</strong> — NeMo Guardrails (<code>LLMRails</code>, Colang flows in <code>config/rails.co</code>, <code>config/config.yml</code>) as the policy engine with NeMo self-check flows. Retired: <code>nemoguardrails</code> pinned langchain-core internals that conflicted with the stack and failed init on every start.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Links</h2>
+    <ul>
+      <li><a href="index.html">Overview</a></li>
+      <li><a href="high-level.html">High-Level Detail</a></li>
+      <li><a href="#">KB — Persian sources</a> (kb/README.md)</li>
+      <li><a href="#">Business guardrail policies</a> (policies/README.md)</li>
+      <li><a href="../README.md">Parent README</a></li>
+    </ul>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <div class="brand">
+      <div class="logo">Dana<span>.</span></div>
+      <div class="site-title">Work RAG Guardrails · Dana Theme</div>
+    </div>
+    <p>Guardrails owns policy enforcement around the self-hosted Gemma generation service. Fail closed by design.</p>
+    <p><strong>Agent:</strong> Dana &nbsp;|&nbsp; <strong>Theme:</strong> white background, crimson (#DC143C) accents &nbsp;|&nbsp; GitHub Pages multi-page site</p>
+  </div>
+</footer>
+</body>
+</html>

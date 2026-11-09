@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dana — Work RAG Guardrails High-Level Detail</title>
+<link rel="stylesheet" href="style.css">
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });
+</script>
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <div class="brand">
+      <div class="logo">Dana<span>.</span></div>
+      <div class="site-title">Work RAG Guardrails</div>
+    </div>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+      <a href="high-level.html" class="active">High-Level Detail</a>
+      <a href="technical.html">Technical Detail</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="page-header">
+    <h1>High-Level Detail</h1>
+    <p>How a request flows through Guardrails, the API contract, configuration, pipeline stages, judge modes, and supporting stores.</p>
+  </div>
+
+  <section>
+    <h2>1. How a request is guarded (MVP path)</h2>
+    <p>MVP path (Vast.ai):</p>
+    <ol>
+      <li>Orchestrator <code>:8100</code> asks Guardrails <code>:8200</code> for an <strong>input rail check</strong> (<code>POST /v1/rails/check</code>, <code>stage=input</code>) before touching the KB.</li>
+      <li>Guardrails runs deterministic signals, then the LLM judge, then the direct-LLM self-check. On any block it returns a premade refusal (<code>finish_reason="content_filter"</code>).</li>
+      <li>If allowed, the orchestrator retrieves from KB <code>:8000</code> and sends its built prompt to Guardrails' <strong>guarded chat endpoint</strong> (<code>POST /v1/chat/completions</code>).</li>
+      <li>Guardrails calls upstream Gemma directly (<code>:18000</code> Vast / <code>:9000</code> H200 manager), runs <strong>output rails</strong> on the generated text, applies PII mask-and-continue or hard block, and returns the OpenAI-compatible response.</li>
+    </ol>
+    <div class="note">
+      Guardrails does not own retrieval, conversation orchestration, the frontend, or model serving. Only Guardrails calls the Gemma manager in the MVP path.
+    </div>
+  </section>
+
+  <section>
+    <h2>2. API contract</h2>
+    <table>
+      <thead>
+        <tr><th>Method</th><th>Path</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>GET</code></td><td><code>/health</code></td><td>Process liveness: <code>{"status":"ok"}</code></td></tr>
+        <tr><td><code>GET</code></td><td><code>/ready</code></td><td>Re-checks upstream Gemma; returns <code>{status, nemo_config_loaded, upstream_reachable, policy_version}</code></td></tr>
+        <tr><td><code>POST</code></td><td><code>/v1/rails/check</code></td><td><code>{stage: "input"|"output", text, request_id}</code> → <code>RailCheckResponse</code></td></tr>
+        <tr><td><code>POST</code></td><td><code>/v1/chat/completions</code></td><td>OpenAI-compatible guarded Gemma generation</td></tr>
+        <tr><td><code>GET</code></td><td><code>/dashboard</code></td><td>Persian dashboard (decision counts, block rate, SVG plots, masked sample viewer)</td></tr>
+        <tr><td><code>GET</code></td><td><code>/dashboard/api/stats</code></td><td>Aggregated decision stats (JSON)</td></tr>
+        <tr><td><code>GET</code></td><td><code>/dashboard/api/events</code></td><td>Decision event log (JSON, PII masked)</td></tr>
+        <tr><td><code>GET</code></td><td><code>/dashboard/api/policy</code></td><td>Active pinned policy (JSON)</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Rail check request</h3>
+    <pre><code>{
+  "stage": "input",
+  "text": "سلام",
+  "request_id": "t"
+}</code></pre>
+
+    <h3>Rail check response (allowed)</h3>
+    <pre><code>{
+  "allowed": true,
+  "action": "allow",
+  "categories": [],
+  "reason": null,
+  "policy_version": "mvp-1",
+  "request_id": "t"
+}</code></pre>
+
+    <h3>Blocked example (production mode)</h3>
+    <p>Premade message, generic category, no internals leaked:</p>
+    <pre><code>{
+  "allowed": false,
+  "action": "refuse",
+  "categories": ["hate"],
+  "reason": "متأسفم، نمی‌توانم به این درخواست پاسخ دهم.",
+  "policy_version": "mvp-1",
+  "request_id": "t"
+}</code></pre>
+
+    <div class="note">
+      <code>RailCheckRequest.text</code> is capped at 10000 chars. <code>finish_reason</code> values: <code>stop</code>, <code>length</code>, <code>content_filter</code>.
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Configuration (environment)</h2>
+    <table>
+      <thead>
+        <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>GUARDRAILS_HOST</code></td><td><code>0.0.0.0</code></td><td>Bind host</td></tr>
+        <tr><td><code>GUARDRAILS_PORT</code></td><td><code>8200</code></td><td>Bind port</td></tr>
+        <tr><td><code>UPSTREAM_LLM_BASE_URL</code></td><td><code>http://127.0.0.1:9000/v1</code></td><td>Upstream Gemma (H200 manager); overridden by <code>LLM_BASE_URL</code> alias</td></tr>
+        <tr><td><code>LLM_BASE_URL</code></td><td>(alias)</td><td>Alias for <code>UPSTREAM_LLM_BASE_URL</code> (Vast: <code>http://127.0.0.1:18000/v1</code>)</td></tr>
+        <tr><td><code>UPSTREAM_LLM_MODEL</code></td><td><code>gemma-4-31b-triton-trt</code></td><td>Upstream model; overridden by <code>LLM_MODEL</code> alias</td></tr>
+        <tr><td><code>LLM_MODEL</code></td><td>(alias)</td><td>Alias for <code>UPSTREAM_LLM_MODEL</code></td></tr>
+        <tr><td><code>UPSTREAM_LLM_API_KEY</code></td><td><code>sk-local-dev</code></td><td>Upstream bearer key; overridden by <code>LLM_API_KEY</code> alias</td></tr>
+        <tr><td><code>UPSTREAM_CONNECT_TIMEOUT</code></td><td><code>10.0</code></td><td>Upstream connect timeout (s)</td></tr>
+        <tr><td><code>UPSTREAM_READ_TIMEOUT</code></td><td><code>120.0</code></td><td>Upstream read timeout (s)</td></tr>
+        <tr><td><code>POLICY_VERSION</code></td><td><code>mvp-1</code></td><td>Policy version reported in responses</td></tr>
+        <tr><td><code>GUARD_JUDGE_MODE</code></td><td><code>on-signal</code></td><td><code>always</code> = judge every text; <code>on-signal</code> = judge only when signals fire</td></tr>
+        <tr><td><code>GUARD_JUDGE_BACKEND</code></td><td><code>gemma</code></td><td><code>gemma</code> = pinned-policy LLM judge; <code>mizan</code> = Mizan System-1; <code>hybrid</code> = Mizan then escalate to Gemma</td></tr>
+        <tr><td><code>GUARD_JUDGE_TIMEOUT</code></td><td><code>60</code></td><td>Judge call timeout (fail closed)</td></tr>
+        <tr><td><code>GUARD_JUDGE_MODEL</code></td><td><code>gemma-4-31b-triton-trt</code></td><td>Gemma judge backend model id</td></tr>
+        <tr><td><code>GUARD_RESPONSE_MODE</code></td><td><code>production</code></td><td><code>production</code> = premade refusal only; <code>verbose</code> = category + reason</td></tr>
+        <tr><td><code>GUARD_NEMO_SELFCHECK</code></td><td><code>on</code></td><td><code>on</code>/<code>shadow</code>/<code>off</code> — governs the direct-LLM self-check (env name kept for backward compatibility; NeMo is gone)</td></tr>
+        <tr><td><code>GUARD_EVENTS_FILE</code></td><td><code>/tmp/guard_events.jsonl</code></td><td>Decision event log (PII masked)</td></tr>
+        <tr><td><code>GUARD_UPSTREAM_CHAR_BUDGET</code></td><td><code>22000</code></td><td>Upstream history-trimming char budget</td></tr>
+      </tbody>
+    </table>
+
+    <div class="note">
+      <code>config/config.yml</code> and <code>config/rails.co</code> remain in the repo as legacy NeMo config files; they are <strong>not loaded or executed</strong> at runtime (the NeMo init path was removed).
+    </div>
+  </section>
+
+  <section>
+    <h2>4. Pipeline stages (signals → judge adjudication)</h2>
+    <p>Deterministic detectors are <strong>evidence, not verdicts</strong> — they emit <code>{detector, category, matched, context}</code> and the judge decides. Only <code>secret</code> keeps a hard block.</p>
+
+    <h3>Input rail check (<code>stage=input</code>)</h3>
+    <ol>
+      <li><code>normalize_persian()</code> — Arabic→Persian char mapping (<code>ي→ی</code>, <code>ك→ک</code>, <code>ة→ه</code>, alef variants→<code>a</code>), ZWNJ/diacritic/tatweel strip, Persian/Arabic digit→ASCII, whitespace collapse (identical to KB-manager preprocessing).</li>
+      <li><code>collect_signals()</code> — injection, jailbreak, HurtLex hate, profanity, out-of-scope — evidence only.</li>
+      <li>Domain pre-check (<code>needs_domain_check</code>) — long text with zero in-domain keywords earns an <code>out_of_domain</code> signal.</li>
+      <li>Policy judge (per <code>GUARD_JUDGE_BACKEND</code>/mode) — pinned-policy categories via LLM; <code>clean-no-signals</code> skips the judge.</li>
+      <li>Direct-LLM self-check (one Yes/No call) — tie-break/dissent handling; policy judge overrules a lone self-check block when signals were clean.</li>
+      <li>Fail closed on any error or timeout.</li>
+    </ol>
+
+    <h3>Output rail check (<code>stage=output</code>)</h3>
+    <ol>
+      <li>Deterministic signals: profanity, HurtLex hate, PII-IR (national-id mod-11, Sheba/IR-IBAN mod-97, mobile/landline).</li>
+      <li><code>secret</code> markers (<code>sk-</code>, <code>api_key</code>, <code>database_url</code>, <code>Bearer </code>) — hard block.</li>
+      <li>Valid PII → mask-and-continue (<code>[masked-pii]</code>); otherwise answer.</li>
+      <li>Fail closed on any error or timeout.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>5. Judge modes &amp; backends</h2>
+    <p><code>GUARD_JUDGE_BACKEND</code> selects the policy judge:</p>
+    <ul>
+      <li><strong>gemma</strong> (default) — pinned-policy categories judged by Gemma LLM calls; <code>VERDICT: allow|block</code> + <code>CATEGORY: &lt;id&gt;</code> parsing; fail closed on unparseable/error.</li>
+      <li><strong>mizan</strong> — Mizan System-1 API (via Manager <code>:9000</code>) returning safety/scope/severity answers.</li>
+      <li><strong>hybrid</strong> — Mizan first, escalate to Gemma on low confidence or hard signals (<code>prompt_injection</code>, <code>jailbreak</code>, <code>secret</code>, <code>pii</code>, <code>hate</code>, <code>offense</code>, <code>profanity</code>).</li>
+    </ul>
+    <p><code>GUARD_JUDGE_MODE</code>:</p>
+    <ul>
+      <li><strong>on-signal</strong> (default): clean texts (no signals) skip the judge entirely.</li>
+      <li><strong>always</strong>: judge every text.</li>
+    </ul>
+    <p>The direct-LLM self-check (<code>GUARD_NEMO_SELFCHECK</code>) runs after the policy judge as a second opinion; <code>shadow</code> logs only, <code>off</code> skips it.</p>
+  </section>
+
+  <section>
+    <h2>6. Classification taxonomy</h2>
+    <p><code>prompt_injection</code> · <code>jailbreak</code> · <code>hate</code> · <code>offense</code>/profanity · <code>pii</code> · <code>out_of_scope</code>/out-of-domain · <code>secret</code> · <code>policy</code> (business) · <code>engine_error</code>. Reports prefer the deterministic signal category when the judge blocks generically (insult → <code>hate</code>, not <code>out-of-domain</code>).</p>
+  </section>
+
+  <section>
+    <h2>7. Business policy store (<code>policies/</code>)</h2>
+    <p>Git-backed versioned prompts: <code>policies/&lt;domain&gt;-v&lt;semver&gt;.yaml</code>, enforced version pinned in <code>policies/active.yaml</code>. Current: <code>ics-credit-v1.0.0</code> (out-of-domain incl. company/people as in-domain; ungrounded-advice). Schema: <code>id/version/stage/categories</code> with <code>prompt</code> (<code>{{text}}</code>/<code>{{signals}}</code>), <code>refusal</code>, <code>examples</code>, plus <code>domain_keywords</code> for the fast no-LLM out-of-domain pre-check. Ship new versions by adding a file + moving the pin — never edit released versions.</p>
+  </section>
+
+  <section>
+    <h2>8. HurtLex Persian allowlist (28 lemmas)</h2>
+    <p>Allowlisted for both input and output HurtLex checks on exact-word match to prevent false positives on legitimate credit terminology. Profanity/PII/secret remain strict and are <strong>not</strong> allowlisted. File: <code>kb/hurtlex_allowlist.json</code>.</p>
+    <table>
+      <thead>
+        <tr><th>Lemma</th><th>Domain</th><th>Evidence</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>حذف</td><td>Credit</td><td><code>درخواست حذف سابقه منفی قدیمی</code></td></tr>
+        <tr><td>بخشی</td><td>Credit</td><td><code>بخشی از اطلاعات</code></td></tr>
+        <tr><td>تأمین مالی</td><td>Credit</td><td>Core term <code>تسهیلات بانکی</code></td></tr>
+        <tr><td>اشتغال</td><td>Credit</td><td><code>اشتغال و سابقه بیمه</code></td></tr>
+        <tr><td>پست</td><td>Credit</td><td><code>پست سازمانی</code></td></tr>
+        <tr><td>مصرف</td><td>Credit</td><td><code>گزارش‌های مصرف</code></td></tr>
+        <tr><td>هدف</td><td>Credit</td><td><code>هدف از دریافت تسهیلات</code></td></tr>
+        <tr><td>نادرست</td><td>Credit</td><td><code>اطلاعات نادرست را اصلاح</code></td></tr>
+        <tr><td>پستی</td><td>Credit</td><td>KB chunk, polite greeting</td></tr>
+        <tr><td>مهم</td><td>Credit</td><td><code>مهم است</code> flagged on <code>جدول نوع تماس</code></td></tr>
+        <tr><td>ضعیف</td><td>Credit</td><td>6 answers with <code>رتبه ضعیف</code></td></tr>
+        <tr><td>خسته</td><td>Social</td><td><code>خسته نباشید</code> greeting</td></tr>
+        <tr><td>شرح</td><td>Credit</td><td><code>شرح</code> = description in reports</td></tr>
+        <tr><td>دسته</td><td>Credit</td><td><code>دسته‌بندی</code> = category</td></tr>
+        <tr><td>جزئی</td><td>Credit</td><td><code>جزئی</code> = partial/minor</td></tr>
+        <tr><td>ناشی</td><td>Credit</td><td><code>ناشی از</code> = resulting from</td></tr>
+        <tr><td>خوشحال</td><td>Social</td><td>Positive sentiment</td></tr>
+        <tr><td>سخت</td><td>General</td><td><code>سخت</code> = difficult</td></tr>
+        <tr><td>پلیس</td><td>Credit</td><td><code>سوابق پلیس</code> credit data source</td></tr>
+        <tr><td>بچه</td><td>General</td><td><code>بچه کجاست؟</code> birthplace — kid/child</td></tr>
+        <tr><td>گروه</td><td>Business</td><td><code>گروه/گروه‌بندی</code> — group</td></tr>
+        <tr><td>مردم</td><td>General</td><td><code>مردم</code> — people</td></tr>
+        <tr><td>دختر</td><td>General</td><td>Girl/daughter</td></tr>
+        <tr><td>خانم</td><td>General</td><td>Ms./lady title</td></tr>
+        <tr><td>پوست</td><td>General</td><td>Skin</td></tr>
+        <tr><td>قوم</td><td>General</td><td>Ethnicity noun (single-word trigger can't see targeting)</td></tr>
+        <tr><td>روستایی</td><td>General</td><td>Rural demographic term</td></tr>
+        <tr><td>قشر</td><td>General</td><td>Stratum/class</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>9. Dashboard (same <code>:8200</code>)</h2>
+    <ul>
+      <li><code>GET /dashboard</code> — Persian panel: decision counts, block rate, per-category / per-detector bars + SVG plots, 24h block timeline, stage donut, filterable terminated-sample viewer (PII masked), policy+mode header.</li>
+      <li><code>GET /dashboard/api/stats</code> · <code>/dashboard/api/events?limit=&amp;blocked_only=</code> · <code>/dashboard/api/policy</code> · <code>/dashboard/api/timeseries</code>.</li>
+      <li>Events: <code>{ts, stage, allowed, category, reason, signals[], text(masked)}</code>. PII is masked at log time; never logged in cleartext.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>10. Libraries and versions</h2>
+    <p>From <code>pyproject.toml</code> (<code>work-rag-guardrails</code> 0.1.0, Python &gt;=3.11):</p>
+    <table>
+      <thead>
+        <tr><th>Library</th><th>Version</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>fastapi</td><td>&gt;=0.115.0</td></tr>
+        <tr><td>uvicorn[standard]</td><td>&gt;=0.30.0</td></tr>
+        <tr><td>pydantic</td><td>&gt;=2.10.0</td></tr>
+        <tr><td>pydantic-settings</td><td>&gt;=2.5.0</td></tr>
+        <tr><td>httpx</td><td>&gt;=0.27.0</td></tr>
+        <tr><td>nemoguardrails</td><td>&gt;=0.17.0 (listed in <code>pyproject.toml</code> but <strong>no longer imported</strong> at runtime — NeMo removed)</td></tr>
+        <tr><td>python-dotenv</td><td>&gt;=1.0.0</td></tr>
+        <tr><td>langfuse</td><td>&gt;=2.60.0</td></tr>
+      </tbody>
+    </table>
+    <p>Dev: <code>pytest&gt;=8.0.0</code>, <code>pytest-asyncio&gt;=0.23.0</code>, <code>pytest-cov&gt;=5.0.0</code>, <code>ruff&gt;=0.5.0</code>, <code>mypy&gt;=1.10.0</code>.</p>
+  </section>
+
+  <section>
+    <h2>Links</h2>
+    <ul>
+      <li><a href="#">KB — Persian sources</a> (kb/README.md)</li>
+      <li><a href="#">Business guardrail policies</a> (policies/README.md)</li>
+      <li><a href="../README.md">Parent README</a></li>
+    </ul>
+    <div class="note">
+      Guardrails does not own retrieval, conversation orchestration, the frontend, or model serving. Only Guardrails calls the Gemma manager in the MVP path.
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <div class="brand">
+      <div class="logo">Dana<span>.</span></div>
+      <div class="site-title">Work RAG Guardrails · Dana Theme</div>
+    </div>
+    <p>Guardrails owns policy enforcement around the self-hosted Gemma generation service. Fail closed by design.</p>
+    <p><strong>Agent:</strong> Dana &nbsp;|&nbsp; <strong>Theme:</strong> white background, crimson (#DC143C) accents &nbsp;|&nbsp; GitHub Pages multi-page site</p>
+  </div>
+</footer>
+</body>
+</html>

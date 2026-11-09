@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dana — Work RAG Guardrails Overview</title>
+<link rel="stylesheet" href="style.css">
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });
+</script>
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <div class="brand">
+      <div class="logo">Dana<span>.</span></div>
+      <div class="site-title">Work RAG Guardrails</div>
+    </div>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+      <a href="high-level.html">High-Level Detail</a>
+      <a href="technical.html">Technical Detail</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="page-header">
+    <h1>Overview</h1>
+    <p>Persian-aware safety policy boundary and <strong>guarded Gemma gateway</strong> for the Work Credit RAG platform.</p>
+  </div>
+
+  <section>
+    <h2><span class="status">Implemented &amp; Live</span> Summary</h2>
+    <p>Guardrails owns <strong>policy enforcement</strong> around the self-hosted Gemma generation service. Status: implemented and live on Vast.ai (<code>vast-gemma4-migration</code>). Deterministic Persian rails + risk scoring + semantic interface.</p>
+    <p><strong>nemoguardrails has been removed.</strong> The service now runs <strong>deterministic signals + a direct-LLM judge</strong> (one-LLM Yes/No self-check) with fail-closed behavior. No NeMo / Colang flow is executed at runtime.</p>
+    <div class="note">
+      <strong>Design goal:</strong> fail closed — if the policy engine errors or times out, the request is refused rather than passed through.
+    </div>
+    <p>In the MVP request path Guardrails:</p>
+    <ul>
+      <li>Runs deterministic input/output checks before retrieval and generation</li>
+      <li>Emits <strong>evidence signals</strong> (injection, jailbreak, HurtLex hate, profanity, scope, PII) that the LLM judge weighs — detectors do not block directly, except <code>secret</code></li>
+      <li>Runs a <strong>direct-LLM judge self-check</strong> (one LLM Yes/No call) as a second opinion</li>
+      <li>Serves an <strong>OpenAI-compatible guarded Gemma gateway</strong> (<code>POST /v1/chat/completions</code>)</li>
+      <li>Returns structured decisions and stable refusal responses</li>
+      <li>Exposes health/readiness endpoints and a Persian dashboard on <code>:8200</code></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Guardrails position in the platform — high-level black box</h2>
+    <div class="diagram">
+      <img src="images/architecture-platform.svg" alt="Guardrails position in the platform" style="max-width:100%; height:auto;">
+      <div class="mermaid">
+flowchart LR
+    ORCH["Orchestrator :8100"]
+    GR["Guardrails :8200<br>signals + direct-LLM judge<br>nemoguardrails removed"]
+    GE["Gemma<br>:18000 Vast / :9000 H200"]
+    ORCH -->|1 POST /v1/rails/check| GR
+    GR -->|2 POST /v1/chat/completions| GE
+    GE -->|generated text| GR
+    GR -->|3 output rails + PII mask| ORCH
+      </div>
+      <details class="mermaid-source">
+        <summary>Diagram source (Mermaid)</summary>
+        <pre><code>flowchart LR
+    ORCH["Orchestrator :8100"]
+    GR["Guardrails :8200\nsignals + direct-LLM judge\nnemoguardrails removed"]
+    GE["Gemma\n:18000 Vast / :9000 H200"]
+    ORCH -->|1 POST /v1/rails/check| GR
+    GR -->|2 POST /v1/chat/completions| GE
+    GE -->|generated text| GR
+    GR -->|3 output rails + PII mask| ORCH</code></pre>
+      </details>
+    </div>
+    <div class="captions">
+      <h4>Diagram terms — every element explained</h4>
+      <ul>
+        <li><strong>ORCH — Orchestrator :8100:</strong> The request coordinator (Work RAG Orchestrator service) that fronts the public API and asks Guardrails to run an input rail check before touching the knowledge base.</li>
+        <li><strong>GR — Guardrails :8200:</strong> The guardrails service itself. Runs deterministic signals plus a direct-LLM judge; nemoguardrails/NeMo has been removed and is no longer executed at runtime.</li>
+        <li><strong>GE — Gemma:</strong> The generation model, reachable at <code>:18000</code> on Vast.ai or <code>:9000</code> on the H200 manager host.</li>
+        <li><strong>Arrow 1 — POST /v1/rails/check:</strong> The input rail check call from the Orchestrator to Guardrails (<code>stage=input</code>) before any retrieval happens.</li>
+        <li><strong>Arrow 2 — POST /v1/chat/completions:</strong> The guarded, OpenAI-compatible Gemma generation call that Guardrails makes (or proxies) to the upstream model.</li>
+        <li><strong>Generated text (GE → GR):</strong> Raw model output flows back into Guardrails so output rails can be applied before the answer reaches the user.</li>
+        <li><strong>Arrow 3 — output rails + PII mask:</strong> Guardrails applies output safety rails (PII masking, hard block on secrets, hate/profanity checks) and returns the final safe response to the Orchestrator.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Internal pipeline (adjudicate) — high-level black box</h2>
+    <div class="diagram">
+      <img src="images/internal-pipeline.svg" alt="Internal pipeline: signals -> judge -> self-check -> output rails" style="max-width:100%; height:auto;">
+      <div class="mermaid">
+flowchart TD
+    IN[input text]
+    PIPE[signals → judge → self-check<br>direct-LLM, nemoguardrails removed]
+    OUT[decision: allow / refuse]
+    IN --> PIPE
+    PIPE --> OUT
+      </div>
+      <details class="mermaid-source">
+        <summary>Diagram source (Mermaid)</summary>
+        <pre><code>flowchart TD
+    IN[input text]
+    PIPE[signals → judge → self-check\ndirect-LLM, nemoguardrails removed]
+    OUT[decision: allow / refuse]
+    IN --> PIPE
+    PIPE --> OUT</code></pre>
+      </details>
+    </div>
+    <div class="captions">
+      <h4>Diagram terms — every element explained</h4>
+      <ul>
+        <li><strong>IN — input text:</strong> The raw user query entering the guardrails pipeline (Persian or any language).</li>
+        <li><strong>PIPE — signals → judge → self-check:</strong> The three-stage adjudication pipeline: deterministic detectors emit evidence, the policy judge weighs it, and a direct-LLM self-check provides a second opinion. nemoguardrails is removed.</li>
+        <li><strong>OUT — decision: allow / refuse:</strong> The final verdict. On any block, Guardrails returns a premade refusal (<code>finish_reason="content_filter"</code>); on allow, generation proceeds.</li>
+        <li><strong>IN → PIPE:</strong> Input text is fed into the adjudication pipeline.</li>
+        <li><strong>PIPE → OUT:</strong> The pipeline produces the allow/refuse decision that gates generation.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Code hierarchy — high-level black box</h2>
+    <div class="diagram">
+      <img src="images/code-hierarchy.svg" alt="Component file tree" style="max-width:100%; height:auto;">
+      <div class="mermaid">
+graph TD
+    ROOT[guardrails/]
+    ROOT --> SRC[src/work_rag_guardrails/]
+    ROOT --> CFG[config/]
+    ROOT --> KB[kb/]
+    ROOT --> POL[policies/]
+    ROOT --> TESTS[tests/]
+    SRC --> API[api.py]
+    SRC --> SVC[service.py]
+    SRC --> JUDGE[judge.py]
+    SRC --> SIG[signals.py]
+      </div>
+      <details class="mermaid-source">
+        <summary>Diagram source (Mermaid)</summary>
+        <pre><code>graph TD
+    ROOT[guardrails/]
+    ROOT --> SRC[src/work_rag_guardrails/]
+    ROOT --> CFG[config/]
+    ROOT --> KB[kb/]
+    ROOT --> POL[policies/]
+    ROOT --> TESTS[tests/]
+    SRC --> API[api.py]
+    SRC --> SVC[service.py]
+    SRC --> JUDGE[judge.py]
+    SRC --> SIG[signals.py]</code></pre>
+      </details>
+    </div>
+    <div class="captions">
+      <h4>Diagram terms — every element explained</h4>
+      <ul>
+        <li><strong>ROOT — guardrails/:</strong> The component root directory containing the guardrails service.</li>
+        <li><strong>SRC — src/work_rag_guardrails/:</strong> The Python package holding all runtime source code.</li>
+        <li><strong>CFG — config/:</strong> Legacy NeMo config files (<code>config.yml</code>, <code>rails.co</code>) that remain in the repo but are not loaded or executed at runtime.</li>
+        <li><strong>KB — kb/:</strong> Knowledge-base safety assets: HurtLex lists, Persian profanity lists, prompt-injection patterns, out-of-scope definitions.</li>
+        <li><strong>POL — policies/:</strong> Git-backed versioned business policy prompts (e.g. <code>ics-credit-v1.0.0.yaml</code>) pinned via <code>active.yaml</code>.</li>
+        <li><strong>TESTS — tests/:</strong> The test suite (pytest) verifying rail behavior.</li>
+        <li><strong>SRC → API / SVC / JUDGE / SIG:</strong> Core modules: <code>api.py</code> (FastAPI app), <code>service.py</code> (pipeline orchestration), <code>judge.py</code> (LLM judge), <code>signals.py</code> (deterministic detectors).</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>What Guardrails does not own</h2>
+    <p>Guardrails does not own retrieval, conversation orchestration, the frontend, or model serving. Only Guardrails calls the Gemma manager in the MVP path. It is a policy enforcement boundary sitting between the Orchestrator and Gemma.</p>
+  </section>
+
+  <section>
+    <h2>Quick links</h2>
+    <ul>
+      <li><a href="high-level.html">High-Level Detail</a> — request path, API contract, configuration, pipeline stages, judge modes, taxonomy, dashboard</li>
+      <li><a href="technical.html">In-Depth Technical Detail</a> — full mermaid diagrams, detailed pipeline stages, running locally, verification, changelog</li>
+      <li><a href="#">KB — Persian sources</a> (kb/README.md)</li>
+      <li><a href="#">Business guardrail policies</a> (policies/README.md)</li>
+    </ul>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <div class="brand">
+      <div class="logo">Dana<span>.</span></div>
+      <div class="site-title">Work RAG Guardrails · Dana Theme</div>
+    </div>
+    <p>Guardrails owns policy enforcement around the self-hosted Gemma generation service. Fail closed by design.</p>
+    <p><strong>Agent:</strong> Dana &nbsp;|&nbsp; <strong>Theme:</strong> white background, crimson (#DC143C) accents &nbsp;|&nbsp; GitHub Pages multi-page site</p>
+  </div>
+</footer>
+</body>
+</html>

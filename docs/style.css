@@ -1,0 +1,314 @@
+/* Dana shared theme — white background, crimson (#DC143C) accents */
+:root {
+  --crimson: #DC143C;
+  --crimson-dark: #b51032;
+  --white: #ffffff;
+  --bg: #ffffff;
+  --surface: #fafafa;
+  --border: #e5e5e5;
+  --text: #111827;
+  --muted: #6b7280;
+  --ink: #374151;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Segoe UI Symbol", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+a { color: var(--crimson); text-decoration: none; }
+a:hover { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--crimson); outline-offset: 2px; }
+
+/* Header / site brand */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+}
+
+.site-header .inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.logo {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--crimson);
+  text-transform: uppercase;
+}
+
+.logo span {
+  color: var(--text);
+}
+
+.site-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.site-nav {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.site-nav a {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--ink);
+  padding: 0.5rem 0;
+  border-bottom: 2px solid transparent;
+}
+
+.site-nav a:hover, .site-nav a.active {
+  color: var(--crimson);
+  border-bottom-color: var(--crimson);
+  text-decoration: none;
+}
+
+/* Main layout */
+main {
+  flex: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem;
+  width: 100%;
+}
+
+.page-header {
+  margin-bottom: 2rem;
+  border-left: 4px solid var(--crimson);
+  padding-left: 1rem;
+}
+
+.page-header h1 {
+  font-size: 2rem;
+  color: var(--text);
+  margin-bottom: 0.25rem;
+}
+
+.page-header p {
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+section {
+  margin-bottom: 3rem;
+}
+
+h2 {
+  font-size: 1.5rem;
+  color: var(--text);
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+h3 {
+  font-size: 1.2rem;
+  color: var(--text);
+  margin: 1.5rem 0 0.75rem;
+}
+
+h4 {
+  font-size: 1.05rem;
+  color: var(--ink);
+  margin: 1rem 0 0.5rem;
+}
+
+p { margin-bottom: 1rem; }
+ul, ol { margin: 0.5rem 0 1rem 1.5rem; }
+li { margin-bottom: 0.35rem; }
+
+/* Status badge */
+.status {
+  display: inline-block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 1rem;
+  background: #fdecea;
+  color: var(--crimson-dark);
+  margin-left: 0.5rem;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.92rem;
+  background: var(--white);
+}
+
+th, td {
+  border: 1px solid var(--border);
+  padding: 0.6rem 0.8rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+th { background: var(--surface); font-weight: 700; color: var(--text); }
+
+tr:nth-child(even) td { background: #fbfbfb; }
+
+code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 0.88em;
+  background: #f3f4f6;
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  color: var(--crimson-dark);
+}
+
+pre {
+  background: #f3f4f6;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+
+pre code {
+  background: transparent;
+  padding: 0;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+/* Callouts */
+.note {
+  background: #fef3f3;
+  border-left: 4px solid var(--crimson);
+  padding: 1rem;
+  margin: 1rem 0;
+  border-radius: 0 6px 6px 0;
+}
+
+.note strong { color: var(--crimson-dark); }
+
+/* Diagram wrapper */
+.diagram {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--white);
+  text-align: center;
+}
+
+.diagram .mermaid {
+  text-align: left;
+}
+
+.diagram caption {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text);
+  margin-bottom: 0.5rem;
+  text-align: left;
+  display: block;
+}
+
+.diagram .mermaid-source {
+  margin-top: 1rem;
+}
+
+.diagram .mermaid-source summary {
+  font-weight: 700;
+  color: var(--crimson);
+  cursor: pointer;
+  list-style: none;
+}
+
+.diagram .mermaid-source summary::marker { content: ""; }
+
+.diagram .mermaid-source pre { margin: 0.5rem 0 0; }
+
+/* Term captions */
+.captions { margin-top: 1.5rem; }
+.captions h4 { border-bottom: none; margin-bottom: 0.5rem; color: var(--crimson-dark); }
+.captions ul { list-style-type: disc; margin-left: 1.5rem; }
+.captions li { margin-bottom: 0.5rem; }
+
+.captions li strong { color: var(--crimson-dark); }
+
+/* Mermaid source code block */
+.mermaid-source pre code { color: var(--ink); }
+
+/* Buttons */
+.btn {
+  display: inline-block;
+  background: var(--crimson);
+  color: var(--white);
+  padding: 0.55rem 1.1rem;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.92rem;
+  border: none;
+  cursor: pointer;
+}
+
+.btn:hover { background: var(--crimson-dark); text-decoration: none; }
+
+/* Footer */
+.site-footer {
+  border-top: 1px solid var(--border);
+  background: var(--white);
+  padding: 2rem 1.5rem;
+  margin-top: auto;
+}
+
+.site-footer .inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.site-footer .brand {
+  margin-bottom: 0.5rem;
+}
+
+.site-footer a { color: var(--ink); }
+.site-footer a:hover { color: var(--crimson); text-decoration: underline; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .site-nav { display: none; }
+  main { padding: 1.5rem 1rem; }
+  .page-header h1 { font-size: 1.5rem; }
+  table { font-size: 0.82rem; }
+  th, td { padding: 0.4rem 0.5rem; }
+}
