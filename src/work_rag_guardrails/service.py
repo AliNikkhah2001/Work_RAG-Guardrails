@@ -100,25 +100,17 @@ def create_app():
 
 # ---- Routes ----
 
-# Premade user-facing refusal message per signal category (production mode).
-# Boundary-setting, informative, and free of internal detector details —
-# "production" mode must never leak verdict reasons, but it should still tell
-# the user WHICH class of violation triggered the refusal and what to do next.
-_CATEGORY_PREMADE = {
-    "prompt_injection": "این دستیار برای پاسخ به سوالات مشتریان طراحی شده و به تلاش‌ها برای تغییر یا نادیده گرفتن دستورات آن واکنش نشان نمی‌دهد. لطفاً پرسش خود را درباره اعتبارسنجی و گزارش اعتباری بپرسید.",
-    "jailbreak": "متأسفم، محدودیت‌های اساسی دستیار تغییرپذیر نیست. لطفاً پرسش خود را در حوزه اعتبارسنجی و گزارش اعتباری مطرح کنید.",
-    "hate": "محتوای پیام شما حاوی توهین یا زبان آزاردهنده است. لطفاً با لحن محترمانه دوباره بپرسید.",
-    "offense": "پیام شما حاوی الفاظ نامناسب است. لطفاً با لحن محترمانه دوباره بپرسید.",
-    "profanity": "پیام شما حاوی الفاظ نامناسب است. لطفاً با لحن محترمانه دوباره بپرسید.",
-    "out_of_scope": "من دستیار هوشمند شرکت اعتبارسنجی ایران هستم و فقط به سوالات مربوط به اعتبارسنجی، گزارش و امتیاز اعتباری (چک و تسهیلات بانکی) پاسخ می‌دهم. لطفاً پرسش خود را در همین حوزه مطرح کنید.",
-    "pii": "برای حفاظت از حریم خصوصی شما، نیازی به ارسال اطلاعات شخصی (مانند کد ملی یا شماره حساب) نیست. لطفاً پرسش را بدون درج اطلاعات شخصی مطرح کنید.",
-    "secret": "نمی‌توانم این اطلاعات را ارائه دهم.",
-    "policy": "درخواست شما با سیاست‌های دستیار مغایرت دارد.",
-    "nemo": "درخواست شما توسط بازبینی امنیتی مسدود شد.",
-}
-
 # Categories whose OUTPUT-stage refusals should blame the answer, not the user.
 _OUTPUT_REDIRECT = {"hate", "offense", "profanity"}
+
+
+def _category_refusal(category: str, *, stage: str = "input", verbose: bool = False) -> str:
+    """Load user-facing refusal text from KB canned pack (vendored YAML fallback)."""
+    from .content_registry import guardrails_refusal, message
+
+    if verbose and stage == "output" and category in _OUTPUT_REDIRECT:
+        return message("output_inappropriate_short") or guardrails_refusal(category, stage=stage)
+    return guardrails_refusal(category, stage=stage) or message("default")
 
 @app.get("/health", response_model=HealthResponse)
 async def health():
@@ -166,23 +158,22 @@ async def check_rails(request: RailCheckRequest):
     category = _CATEGORY_ALIASES.get(category, category)
     mode = settings.guard_response_mode.strip().lower()
     if mode == "verbose":
-        msg_map = _CATEGORY_PREMADE
-        base = msg_map.get(category, "درخواست شما مسدود شد.")
-        if request.stage == "output" and category in _OUTPUT_REDIRECT:
-            base = "پاسخ حاوی محتوای نامناسب است."
+        from .content_registry import message as _msg
+
+        base = _category_refusal(category, stage=request.stage, verbose=True) or _msg(
+            "blocked_generic"
+        )
         return RailCheckResponse(
             allowed=False, action="refuse", categories=[category or "policy"],
             reason=base + f" ({verdict.get('reason', '')})",
             policy_version=settings.policy_version,
             request_id=request.request_id,
         )
-    # Production mode: premade message for the detected class — internal
+    # Production mode: canned pack message for the detected class — internal
     # interception details are not leaked, but the user sees which boundary was hit.
-    premade = _CATEGORY_PREMADE.get(category, "") or (
-        settings.refusal_message
-        or "متأسفم، نمی‌توانم به این درخواست پاسخ دهم.")
-    if request.stage == "output" and category in _OUTPUT_REDIRECT:
-        premade = "پاسخ حاوی محتوای نامناسب است و قابل ارائه نیست."
+    premade = _category_refusal(category, stage=request.stage) or (
+        settings.refusal_message or ""
+    )
     return RailCheckResponse(
         allowed=False, action="refuse", categories=[category or "policy"],
         reason=premade, policy_version=settings.policy_version,
@@ -231,9 +222,10 @@ _UPSTREAM_SYSTEM_CHAR_CAP = 3000
 # context-augmented user message whole; rails only need the question portion.
 _RAIL_TEXT_CAP = 9999
 
-_UPSTREAM_ERROR_TEXT = (
-    "متأسفم در فراخوانی مدل مشکلی پیش آمد. لطفاً مکالمه را کوتاه‌تر کنید و دوباره تلاش کنید."
-)
+def _upstream_error_text() -> str:
+    from .content_registry import message
+
+    return message("upstream_model_error")
 
 
 def _fit_upstream_messages(messages: list) -> list:
@@ -312,7 +304,8 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
         RailCheckRequest(stage="input", text=input_text[:_RAIL_TEXT_CAP])
     )
     if not input_check.allowed:
-        refusal_msg = input_check.reason or "I cannot process that request."
+        from .content_registry import message as _msg
+        refusal_msg = input_check.reason or _msg("cannot_process")
         return ChatCompletionResponse(
             model=request.model,
             choices=[
@@ -338,14 +331,16 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
             bot_response = await _call_upstream(upstream_messages, request)
 
         if not bot_response or not bot_response.strip():
-            bot_response = "متأسفم، مدل پاسخ مناسبی تولید نکرد. بر اساس منابع بازیابی‌شده، لطفاً سوال را واضح‌تر بپرسید."
+            from .content_registry import message as _msg
+            bot_response = _msg("empty_model_response")
 
         # Output rail check (signals → judge, fail closed)
         output_check = await check_rails(
             RailCheckRequest(stage="output", text=bot_response)
         )
         if not output_check.allowed:
-            refusal_msg = output_check.reason or "I cannot provide that response."
+            from .content_registry import message as _msg
+            refusal_msg = output_check.reason or _msg("cannot_provide")
             return ChatCompletionResponse(
                 model=request.model,
                 choices=[
@@ -388,7 +383,7 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
                     index=0,
                     message={
                         "role": "assistant",
-                        "content": _UPSTREAM_ERROR_TEXT,
+                        "content": _upstream_error_text(),
                     },
                     finish_reason="length",
                 )
@@ -406,7 +401,7 @@ async def guarded_completion(request: ChatCompletionRequest) -> ChatCompletionRe
                         "role": "assistant",
                         # No internals leaked to the caller (400 bodies contain
                         # token-budget details); callers only need to retry.
-                        "content": _UPSTREAM_ERROR_TEXT,
+                        "content": _upstream_error_text(),
                     },
                     # NOTE: ChatCompletionChoice.finish_reason is a Literal of
                     # stop/length/content_filter — "error" crashed pydantic
@@ -435,7 +430,8 @@ async def guarded_completion_stream(request: ChatCompletionRequest):
     input_check = await check_rails(RailCheckRequest(stage="input", text=input_text[:_RAIL_TEXT_CAP]))
     if not input_check.allowed:
         # Stream refusal as single chunk
-        refusal = input_check.reason or "I cannot comply."
+        from .content_registry import message as _msg
+        refusal = input_check.reason or _msg("cannot_comply")
         yield f"data: {json.dumps({'choices':[{'delta':{'content': refusal},'finish_reason':'content_filter'}]}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
         return
@@ -454,7 +450,8 @@ async def guarded_completion_stream(request: ChatCompletionRequest):
         # Output rail check after full
         output_check = await check_rails(RailCheckRequest(stage="output", text=bot_response))
         if not output_check.allowed:
-            bot_response = output_check.reason or "I cannot provide that response."
+            from .content_registry import message as _msg
+            bot_response = output_check.reason or _msg("cannot_provide")
             yield f"data: {json.dumps({'choices':[{'delta':{'content': bot_response},'finish_reason':'content_filter'}]}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
             return
@@ -581,7 +578,8 @@ async def chat_completions_stream(request: ChatCompletionRequest):
         RailCheckRequest(stage="input", text=input_text[:_RAIL_TEXT_CAP])
     )
     if not input_check.allowed:
-        refusal_msg = input_check.reason or "I cannot process that request."
+        from .content_registry import message as _msg
+        refusal_msg = input_check.reason or _msg("cannot_process")
         async def refusal_stream():
             yield refusal_msg
         return StreamingResponse(refusal_stream(), media_type="text/plain")
@@ -603,10 +601,10 @@ async def chat_completions_stream(request: ChatCompletionRequest):
 
         except httpx.TimeoutException:
             log.error("Upstream timeout")
-            yield _UPSTREAM_ERROR_TEXT
+            yield _upstream_error_text()
         except Exception as e:
             log.exception("Upstream error")
-            yield _UPSTREAM_ERROR_TEXT
+            yield _upstream_error_text()
 
     return StreamingResponse(content_stream(), media_type="text/plain")
 
