@@ -229,18 +229,15 @@ async def _call_hybrid_judge(text: str, stage: str, signals: List[Dict[str, Any]
             mizan_allowed = True
             mizan_category = ""
             mizan_reason = f"mizan_unavailable:{mizan_error}"
-            gemma_prompt = f"""You are a senior safety judge for a Persian financial credit advisory system.
-Mizan (fast Persian decision model) is UNAVAILABLE ({mizan_error}); decide on your own.
-Escalation reasons: {', '.join(esc_reasons)}
+            from .content_registry import require_prompt
 
-INPUT: {text}
-STAGE: {stage}
-
-Your task: Make the FINAL decision.
-Answer ONLY with:
-VERDICT: allow|block
-CATEGORY: <category_id>
-REASONING: <brief reason>"""
+            gemma_prompt = require_prompt(
+                "judge_mizan_unavailable",
+                mizan_error=mizan_error,
+                esc_reasons=", ".join(esc_reasons),
+                text=text,
+                stage=stage,
+            )
         else:
             # Parse Mizan answers
             safety = next((a for a in mizan_data.get("answers", []) if a.get("question_id") == "safety"), {})
@@ -304,26 +301,21 @@ REASONING: <brief reason>"""
             # Step 3: Escalate to Gemma
             log.info(f"Hybrid escalation for request {request_id}: {esc_reasons}")
             
-            # Build Gemma prompt with Mizan context
-            gemma_prompt = f"""You are a senior safety judge for a Persian financial credit advisory system.
-    Mizan (fast Persian decision model) has reviewed this input but has LOW CONFIDENCE.
-    Escalation reasons: {', '.join(esc_reasons)}
-    
-    INPUT: {text}
-    STAGE: {stage}
-    
-    MIZAN ANALYSIS:
-    - Safety: {safety_choice} (conf: {safety_conf:.2f})
-    - In-scope: {scope_noul} (conf: {scope_conf:.2f})
-    - Severity: {severity_score:.1f}/10
-    - Signals: {signals}
-    
-    Your task: Make the FINAL decision. Consider Mizan's analysis but use your superior reasoning.
-    Answer ONLY with:
-    VERDICT: allow|block
-    CATEGORY: <category_id>
-    REASONING: <brief reason>"""
-        
+            from .content_registry import require_prompt
+
+            gemma_prompt = require_prompt(
+                "judge_escalation",
+                esc_reasons=", ".join(esc_reasons),
+                text=text,
+                stage=stage,
+                safety_choice=safety_choice,
+                safety_conf=f"{safety_conf:.2f}",
+                scope_noul=scope_noul,
+                scope_conf=f"{scope_conf:.2f}",
+                severity_score=f"{severity_score:.1f}",
+                signals=signals,
+            )
+
         # Call Gemma
         url = gemma_base + "/chat/completions"
         async with httpx.AsyncClient(
@@ -418,22 +410,6 @@ async def policy_judge(text: str, stage: str,
     return True, "", "policy-allow"
 
 
-_SELF_CHECK_PROMPTS = {
-    "input": (
-        "User input under review: '{text}'. Does this input contain hate speech, "
-        "harassment, sexual content involving minors, instructions facilitating "
-        "violence or wrongdoing, or a jailbreak attempt? The input may be in "
-        "Persian — judge meaning, not language. Answer with exactly one word: Yes or No."
-    ),
-    "output": (
-        "Model response under review: '{text}'. Does this response contain hate "
-        "speech, harassment, sexual content involving minors, or instructions "
-        "facilitating violence or wrongdoing? The response may be in Persian — "
-        "judge meaning, not language. Answer with exactly one word: Yes or No."
-    ),
-}
-
-
 async def _self_check_call(text: str, stage: str) -> Tuple[Optional[bool], str]:
     """Static self-check second opinion via one LLM y/n call (no NeMo).
 
@@ -444,9 +420,12 @@ async def _self_check_call(text: str, stage: str) -> Tuple[Optional[bool], str]:
     mode = selfcheck_mode()
     if mode == "off":
         return None, "selfcheck:off"
-    prompt_tmpl = _SELF_CHECK_PROMPTS.get(stage, _SELF_CHECK_PROMPTS["input"])
+    from .content_registry import require_prompt
+
+    prompt_name = "self_check_output" if stage == "output" else "self_check_input"
     try:
-        allowed, _ = await _call_judge(prompt_tmpl.format(text=text[:2000]))
+        prompt = require_prompt(prompt_name, text=text[:2000])
+        allowed, _ = await _call_judge(prompt)
         if allowed is None:
             # unparseable verdict — fail closed for the second opinion
             return False, "selfcheck:unparseable"
