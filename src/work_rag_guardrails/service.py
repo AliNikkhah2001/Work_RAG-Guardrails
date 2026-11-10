@@ -487,8 +487,9 @@ async def chat_completions(request: ChatCompletionRequest):
 async def _call_upstream_stream(messages: list, request: ChatCompletionRequest):
     """Yield raw content deltas from upstream with stream=true (real streaming, no added latency).
 
-    Upstream llama-server :18000 currently returns JSON even with stream:true (no SSE),
-    so we handle both: if SSE, stream deltas; if JSON, chunk the full content without sleep.
+    Works for both API upstreams (LiteLLM/OpenRouter) and self-hosted (llama-server /
+    Gemma manager). Prefer SSE; only fall back to buffered JSON when the upstream
+    explicitly returns application/json (some older self-hosted builds).
     """
     settings = get_settings()
     async with httpx.AsyncClient(
@@ -508,20 +509,23 @@ async def _call_upstream_stream(messages: list, request: ChatCompletionRequest):
                 "max_tokens": request.max_tokens or 4000,
                 "temperature": request.temperature,
                 "stream": True,
+                # chat_template_kwargs is ignored by OpenAI/OpenRouter; required for Gemma GGUF
                 "chat_template_kwargs": {"enable_thinking": False},
             },
-            headers={"Authorization": f"Bearer {settings.resolved_api_key}"},
+            headers={
+                "Authorization": f"Bearer {settings.resolved_api_key}",
+                "Accept": "text/event-stream",
+            },
         ) as resp:
             resp.raise_for_status()
-            ctype = resp.headers.get("content-type", "")
-            # Fallback: upstream returned buffered JSON (no SSE)
-            if "application/json" in ctype:
+            ctype = (resp.headers.get("content-type") or "").lower()
+            # Buffered JSON fallback (self-hosted quirk) — hurts TTFT; keep as last resort
+            if "application/json" in ctype and "text/event-stream" not in ctype:
                 try:
                     body = await resp.aread()
                     data = json.loads(body)
                     raw = data["choices"][0]["message"]["content"]
                     raw = _clean_gemma_output(raw)
-                    # Chunk without artificial delay — still counts as streaming from guardrails perspective
                     for tok in raw.split(" "):
                         if tok:
                             yield tok + " "
@@ -529,7 +533,7 @@ async def _call_upstream_stream(messages: list, request: ChatCompletionRequest):
                 except Exception as e:
                     log.warning("Fallback JSON parse failed: %s", e)
                     return
-            # Real SSE path
+            # Real SSE path (OpenRouter/LiteLLM + modern llama-server / manager)
             async for line in resp.aiter_lines():
                 if not line or not line.startswith("data:"):
                     continue
