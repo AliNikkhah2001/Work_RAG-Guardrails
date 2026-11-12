@@ -35,6 +35,27 @@ _JUDGE_TIMEOUT = float(os.getenv("GUARD_JUDGE_TIMEOUT", "60"))
 _JUDGE_MODEL = os.getenv("GUARD_JUDGE_MODEL", "gemma-4-31b-triton-trt")
 _JUDGE_BACKEND = os.getenv("GUARD_JUDGE_BACKEND", "gemma").strip().lower()  # gemma | mizan | hybrid
 
+# ICS product / leaf terms that Mizan often mislabels as out-of-scope when the
+# utterance lacks the word «اعتبارسنجی» (e.g. «طرح کفیل چیه؟»).
+_ICS_PRODUCT_ALLOW = (
+    "کفیل",
+    "کفالت",
+    "وجه‌الکفاله",
+    "وجه الکفاله",
+    "نردبان",
+    "نردبان اعتباری",
+    "مشتریان من",
+    "تامین‌کننده",
+    "تامین کننده",
+)
+
+
+def _has_ics_product_keyword(text: str) -> bool:
+    from .actions import normalize_persian as _norm
+
+    norm = _norm(text or "")
+    return any(_norm(k) in norm for k in _ICS_PRODUCT_ALLOW)
+
 
 def judge_mode() -> str:
     return os.getenv("GUARD_JUDGE_MODE", "on-signal").strip().lower()
@@ -485,6 +506,16 @@ async def adjudicate(text: str, stage: str = "input") -> Dict[str, Any]:
                 "reason": "judge:error-fail-closed",
                 "details": {"signals": signals}}
     if not allowed:
+        # Known ICS products (کفیل / نردبان / …) must not be refused as
+        # out_of_scope when Mizan/Gemma lack the «اعتبارسنجی» cue.
+        if (category or "") in ("out_of_scope", "out_of_domain", "off_domain") and _has_ics_product_keyword(text):
+            log.info("ICS product allowlist overruled %s for %r", category, text[:80])
+            return {
+                "allowed": True,
+                "category": "",
+                "reason": "ics-product-allowlist",
+                "details": {"signals": signals, "judge": "ics-product-allowlist", "overruled": reason},
+            }
         # Prefer the deterministic signal category when the judge blocks
         # on a generic business category but a hard signal fired (e.g. an
         # insult blocked as out-of-domain → report hate/offense instead).

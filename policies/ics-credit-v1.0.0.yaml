@@ -8,7 +8,8 @@ stage: [input, output]
 # NOTE: no interrogatives/auxiliaries here (چیست/کیست/کجاست/...) — they occur
 # in every question including off-domain ones and would exempt everything.
 domain_keywords: [اعتبار, اعتبارسنجی, گزارش, امتیاز, رتبه, وام, تسهیلات, چک,
-  صیادی, بدهی, اقساط, ضامن, سابقه, خوش‌حسابی, بدحسابی, استعلام,
+  صیادی, بدهی, اقساط, ضامن, کفیل, کفالت, وجه‌الکفاله, نردبان, طرح کفیل,
+  مشتریان من, تامین‌کننده, تامین کننده, پنل, سابقه, خوش‌حسابی, بدحسابی, استعلام,
   شرکت, مدیر, مدیرعامل, هیئت, قاسم, ایران, ICS, سلام, درود, ممنون, مرسی,
   تشکر, خداحافظ]
 categories:
@@ -17,8 +18,9 @@ categories:
     prompt: |-
       You are a domain gate for the Iranian Credit Scoring (ICS) assistant.
       IN-DOMAIN (ALLOW): credit topics (reports, scores, ranks, checks, debts,
-      disputes, inquiries); the COMPANY itself, its people, managers, board,
-      products and services (e.g. where is the CEO from, who is the manager);
+      disputes, inquiries); ICS products including guarantor/کفیل/کفالت,
+      credit ladder/نردبان اعتباری, supplier panel, customers-me panel;
+      the COMPANY itself, its people, managers, board, products and services;
       smalltalk (greetings, thanks, farewell).
       OUT-OF-DOMAIN (BLOCK): clearly unrelated everyday domains — cooking,
       sports, entertainment, travel, religion, politics — with no link to
