@@ -49,12 +49,24 @@ _ICS_PRODUCT_ALLOW = (
     "تامین کننده",
 )
 
+# Credit-domain terms Mizan often mislabels out-of-scope when «اعتبارسنجی»
+# is absent (e.g. «چگونه سوابق منفی را رفع کنم؟» — plural سوابق vs سابقه).
+_ICS_DOMAIN_ALLOW = (
+    "سوابق",
+    "سوابق منفی",
+    "گزارش اعتباری",
+    "گزارش",
+    "کارت اعتباری",
+    "رفع سوء",
+    "رفع سو",
+)
+
 
 def _has_ics_product_keyword(text: str) -> bool:
     from .actions import normalize_persian as _norm
 
     norm = _norm(text or "")
-    return any(_norm(k) in norm for k in _ICS_PRODUCT_ALLOW)
+    return any(_norm(k) in norm for k in (*_ICS_PRODUCT_ALLOW, *_ICS_DOMAIN_ALLOW))
 
 
 def judge_mode() -> str:
