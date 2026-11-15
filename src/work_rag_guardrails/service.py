@@ -436,37 +436,51 @@ async def guarded_completion_stream(request: ChatCompletionRequest):
         yield "data: [DONE]\n\n"
         return
 
-    upstream_messages = [{"role": m["role"], "content": m["content"]} for m in request.messages]
-    upstream_messages = _fit_upstream_messages(upstream_messages)
-    # If NeMo rails loaded, we can't true-stream through NeMo (generate_async is buffered)
-    # So in NEMO mode we fall back to buffered then chunk; else real stream
-    rails = get_rails_app()
-    if rails is not None:
-        # Buffered fallback: call non-streaming then yield chunks without artificial delay
-        # Still faster than fake streaming with sleep, but not token-by-token from LLM
-        result = await rails.generate_async(messages=upstream_messages)
-        bot_response = result.get("content", "") if isinstance(result, dict) else str(result)
-        bot_response = _clean_gemma_output(bot_response)
-        # Output rail check after full
-        output_check = await check_rails(RailCheckRequest(stage="output", text=bot_response))
-        if not output_check.allowed:
-            from .content_registry import message as _msg
-            bot_response = output_check.reason or _msg("cannot_provide")
-            yield f"data: {json.dumps({'choices':[{'delta':{'content': bot_response},'finish_reason':'content_filter'}]}, ensure_ascii=False)}\n\n"
+    # Match non-stream guarded_completion: never let upstream 400/timeout/OOM
+    # abort the SSE uncaught. Orch's stream client treats a broken SSE as
+    # IncompleteRead/HTTPError and surfaces the Persian catch-all
+    # «خطا در پردازش درخواست.» — especially visible on GPU TRT 8192 after
+    # long WebUI threads. Yield a safe message + finish_reason=length instead.
+    try:
+        upstream_messages = [{"role": m["role"], "content": m["content"]} for m in request.messages]
+        upstream_messages = _fit_upstream_messages(upstream_messages)
+        # If NeMo rails loaded, we can't true-stream through NeMo (generate_async is buffered)
+        # So in NEMO mode we fall back to buffered then chunk; else real stream
+        rails = get_rails_app()
+        if rails is not None:
+            # Buffered fallback: call non-streaming then yield chunks without artificial delay
+            # Still faster than fake streaming with sleep, but not token-by-token from LLM
+            result = await rails.generate_async(messages=upstream_messages)
+            bot_response = result.get("content", "") if isinstance(result, dict) else str(result)
+            bot_response = _clean_gemma_output(bot_response)
+            # Output rail check after full
+            output_check = await check_rails(RailCheckRequest(stage="output", text=bot_response))
+            if not output_check.allowed:
+                from .content_registry import message as _msg
+                bot_response = output_check.reason or _msg("cannot_provide")
+                yield f"data: {json.dumps({'choices':[{'delta':{'content': bot_response},'finish_reason':'content_filter'}]}, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+            # Yield without sleep — real generation already done, just chunk
+            for tok in bot_response.split(" "):
+                yield f"data: {json.dumps({'choices':[{'delta':{'content': tok+' '}}]}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
             return
-        # Yield without sleep — real generation already done, just chunk
-        for tok in bot_response.split(" "):
-            yield f"data: {json.dumps({'choices':[{'delta':{'content': tok+' '}}]}, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
-        return
 
-    # Deterministic mode: real upstream streaming (no added latency)
-    async for content in _call_upstream_stream(upstream_messages, request):
-        # Optionally light clean per token
-        # we don't sleep — tokens arrive as fast as LLM generates (~30-50ms)
-        yield f"data: {json.dumps({'choices':[{'delta':{'content': content}}]}, ensure_ascii=False)}\n\n"
-    yield "data: [DONE]\n\n"
+        # Deterministic mode: real upstream streaming (no added latency)
+        async for content in _call_upstream_stream(upstream_messages, request):
+            # Optionally light clean per token
+            # we don't sleep — tokens arrive as fast as LLM generates (~30-50ms)
+            yield f"data: {json.dumps({'choices':[{'delta':{'content': content}}]}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+    except httpx.TimeoutException:
+        log.error("Upstream timeout during streaming completion")
+        yield f"data: {json.dumps({'choices':[{'delta':{'content': _upstream_error_text()},'finish_reason':'length'}]}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+    except Exception:
+        log.exception("Upstream error during streaming completion")
+        yield f"data: {json.dumps({'choices':[{'delta':{'content': _upstream_error_text()},'finish_reason':'length'}]}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
 
 
 @app.post("/v1/chat/completions")
