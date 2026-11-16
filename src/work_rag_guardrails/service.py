@@ -215,7 +215,9 @@ def _clean_gemma_output(text: str) -> str:
 # and arrive here as httpx 400. Trim history (keep newest turns + truncated
 # system prompt) to a conservative char budget (~4.5 chars/token for Persian;
 # 25k chars ≈ 5.5k input tokens + 2k output < 8192).
-_UPSTREAM_CHAR_BUDGET = int(os.getenv("GUARD_UPSTREAM_CHAR_BUDGET", "22000"))
+# Manager also fails over to llama.cpp GPU0 (n_ctx=16384) if TRT still 400s.
+# 18k chars ≈ ~5k input tokens + generation headroom under TRT 8192.
+_UPSTREAM_CHAR_BUDGET = int(os.getenv("GUARD_UPSTREAM_CHAR_BUDGET", "18000"))
 _UPSTREAM_SYSTEM_CHAR_CAP = 3000
 
 # RailCheckRequest.text is capped at 10000 chars (models.py) — never feed it a
