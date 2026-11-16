@@ -7,9 +7,9 @@ stage: [input, output]
 # these CONTENT keywords get an `out_of_domain` SIGNAL forcing a review.
 # NOTE: no interrogatives/auxiliaries here (چیست/کیست/کجاست/...) — they occur
 # in every question including off-domain ones and would exempt everything.
-domain_keywords: [اعتبار, اعتبارسنجی, گزارش, امتیاز, رتبه, وام, تسهیلات, چک,
+domain_keywords: [اعتبار, اعتبارسنجی, گزارش, امتیاز, رتبه, وام, تسهیلات, چک, سفته,
   صیادی, بدهی, اقساط, ضامن, کفیل, کفالت, وجه‌الکفاله, نردبان, طرح کفیل,
-  مشتریان من, تامین‌کننده, تامین کننده, پنل, سابقه, خوش‌حسابی, بدحسابی, استعلام,
+  مشتریان من, تامین‌کننده, تامین کننده, پنل, سابقه, سوابق, سوابق منفی, خوش‌حسابی, بدحسابی, استعلام,
   شرکت, مدیر, مدیرعامل, هیئت, قاسم, ایران, ICS, سلام, درود, ممنون, مرسی,
   تشکر, خداحافظ]
 categories:
