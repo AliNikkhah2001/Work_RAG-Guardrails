@@ -66,6 +66,8 @@ def needs_domain_check(text: str, policy=None) -> bool:
     """Fast no-LLM domain pre-check: long text with zero in-domain keywords
     (policy `domain_keywords`) earns an out_of_domain SIGNAL forcing review."""
     from .actions import normalize_persian as _norm
+    import re as _re
+
     if policy is None:
         try:
             from .policies import load_active_policy as _load
@@ -85,5 +87,8 @@ def needs_domain_check(text: str, policy=None) -> bool:
         "هیچکدام", "هیچ کدوم", "هیچ‌کدام", "هیچ‌کدوم",
     }
     if norm.strip() in smalltalk:
+        return False
+    # A reason-code-shaped token (HAD1, DAG1-1) is an in-domain cue on its own.
+    if _re.search(r"\b[A-Za-z]{2,6}\d{1,2}(?:-\d{1,2})?\b", norm):
         return False
     return not any(_norm(k) in norm for k in kws if len(_norm(k)) > 1)

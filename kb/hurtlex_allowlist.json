@@ -29,7 +29,11 @@
     "قوم",
     "روستایی",
     "قشر",
-    "مادر"
+    "مادر",
+    "کوچک",
+    "مشکل",
+    "عقب افتاده",
+    "شبه"
   ],
   "normalized_allowlist": [
     "حذف",
@@ -60,7 +64,11 @@
     "قوم",
     "روستایی",
     "قشر",
-    "مادر"
+    "مادر",
+    "کوچک",
+    "مشکل",
+    "عقب افتاده",
+    "شبه"
   ],
   "evidence": {
     "حذف": "2 KB chunks + 2 credit phrases flagged; legitimate: 'درخواست حذف سابقه منفی قدیمی از گزارش اعتباری'",
@@ -88,7 +96,11 @@
     "قوم": "Plain noun ethnicity/tribe in benign questions. Single-word matching cannot see targeting context; genuine ethno-hate needs phrasal/contextual detection (future work), not a lone-noun trigger.",
     "روستایی": "Ordinary demographic adjective rural. Cannot indicate hate alone.",
     "قشر": "Ordinary socioeconomic noun stratum/class. Cannot indicate hate alone.",
-    "مادر": "User query 'مادر اعتبار سنجی چطور می تونیم گزارش استعلام کنیم' blocked as hate:مادر. مادر = mother, ordinary noun (birthplace/family/company questions). Targeted abuse using مادر still triggers on the accompanying slur via profanity/HurtLex lists."
+    "مادر": "User query 'مادر اعتبار سنجی چطور می تونیم گزارش استعلام کنیم' blocked as hate:مادر. مادر = mother, ordinary noun (birthplace/family/company questions). Targeted abuse using مادر still triggers on the accompanying slur via profanity/HurtLex lists.",
+    "کوچک": "Reason-code audit (2026-11-17): 'با دریافت تسهیلات — حتی با مبالغ کوچک — و پرداخت به‌موقع اقساط' (BCC1 improvement suggestion) blocked as hate:کوچک. کوچک = small, ordinary adjective; the HurtLex entry is the animal-sense lemma and cannot indicate hate alone.",
+    "مشکل": "Reason-code audit (2026-11-17): reason-code improvement text ('مشکل' = problem/difficulty, e.g. 'مدیریت جریان نقدی') blocked as hate:مشکل. Ordinary noun in credit-report prose.",
+    "عقب افتاده": "Reason-code audit (2026-11-17): 'عقب افتاده' = overdue/in arrears — a core credit term ('بدهی عقب افتاده') blocked as hate. Essential domain vocabulary, cannot indicate hate alone.",
+    "شبه": "Reason-code audit (2026-11-17): 'شبه' = pseudo/quasi (e.g. 'شبه‌کارت'), ordinary prefix/noun blocked as hate. Cannot indicate hate alone."
   },
   "policy": "For MVP, these lemmas are allowlisted for both input and output HurtLex checks when they appear as exact-word matches. Profanity, PII, secret remain strict. Input vs output policy separated: output allowlist is primary; input allowlist prevents trusted KB context from triggering false positives in guarded_completion's augmented prompt check."
 }

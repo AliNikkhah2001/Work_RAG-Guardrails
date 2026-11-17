@@ -202,3 +202,29 @@ class TestHurtlexStrictStillBlocked:
         text = "مادر اعتبار سنجی چطور می تونیم گزارش استعلام کنیم"
         blocked, reason = check_hurtlex_fa(text)
         assert blocked is False, f"مادر blocked as {reason}"
+
+    def test_kuchak_allowed(self):
+        """کوچک = small (HurtLex animal-sense lemma). Reason-code audit: BCC1 improvement text."""
+        text = "با دریافت تسهیلات — حتی با مبالغ کوچک — و پرداخت به‌موقع اقساط، امتیاز خود را ارتقا دهید"
+        blocked, reason = check_hurtlex_fa(text)
+        assert blocked is False, f"کوچک blocked as {reason}"
+        blocked_out, _, _ = check_output_persian(text)
+        assert blocked_out is False
+
+    def test_moshkel_allowed(self):
+        """مشکل = problem/difficulty. Reason-code audit: common in credit-report prose."""
+        text = "این موضوع نشان می‌دهد شرکت در مدیریت جریان نقدی و کنترل حساب‌ها مشکل داشته است"
+        blocked, reason = check_hurtlex_fa(text)
+        assert blocked is False, f"مشکل blocked as {reason}"
+
+    def test_aghab_oftadeh_allowed(self):
+        """عقب افتاده = overdue/in arrears — core credit term."""
+        text = "بدهی عقب افتاده و اقساط پرداخت‌نشده سبب کاهش امتیاز اعتباری می‌شود"
+        blocked, reason = check_hurtlex_fa(text)
+        assert blocked is False, f"عقب افتاده blocked as {reason}"
+
+    def test_shabah_allowed(self):
+        """شبه = pseudo/quasi. Reason-code audit: ordinary prefix/noun."""
+        text = "خدمات شبه‌کارت در گزارش اعتباری لحاظ می‌شود"
+        blocked, reason = check_hurtlex_fa(text)
+        assert blocked is False, f"شبه blocked as {reason}"
