@@ -1,0 +1,67 @@
+# ICS credit-scoring business guardrails v1.0.1.
+# v1.0.1: add reason-code vocabulary to domain_keywords so direct reason-code
+# asks («کد دلیل X»، «کدهای علل»، «reason code») are not blocked as out_of_scope,
+# plus حقیقی/حقوقی/اشخاص حقیقی/اشخاص حقوقی/مدل اصلی/مدل جایگزین for cross-model
+# follow-ups like «حالا همین را برای مدل اشخاص حقوقی بگو».
+# v1.0.0 (seed version): initial ICS policy.
+id: ics-credit
+version: 1.0.1
+stage: [input, output]
+# Fast domain pre-check (no LLM): texts longer than a few words with NONE of
+# these CONTENT keywords get an `out_of_domain` SIGNAL forcing a review.
+# NOTE: no interrogatives/auxiliaries here (چیست/کیست/کجاست/...) — they occur
+# in every question including off-domain ones and would exempt everything.
+domain_keywords: [اعتبار, اعتبارسنجی, گزارش, امتیاز, رتبه, وام, تسهیلات, چک, سفته,
+  صیادی, بدهی, اقساط, ضامن, کفیل, کفالت, وجه‌الکفاله, نردبان, طرح کفیل,
+  مشتریان من, تامین‌کننده, تامین کننده, پنل, سابقه, سوابق, سوابق منفی, خوش‌حسابی, بدحسابی, استعلام,
+  دلیل, دلایل, کد دلیل, کدهای دلیل, کد علت, کدهای علل, شرح دلیل, متن دلیل, reason code,
+  حقیقی, حقوقی, اشخاص حقیقی, اشخاص حقوقی, مدل اصلی, مدل جایگزین, مدل اعتبارسنجی,
+  شرکت, مدیر, مدیرعامل, هیئت, قاسم, ایران, ICS, سلام, درود, ممنون, مرسی,
+  تشکر, خداحافظ]
+categories:
+  - id: out-of-domain
+    title: "خارج از حوزه اعتبارسنجی"
+    prompt: |-
+      You are a domain gate for the Iranian Credit Scoring (ICS) assistant.
+      IN-DOMAIN (ALLOW): credit topics (reports, scores, ranks, checks, debts,
+      disputes, inquiries); ICS products including guarantor/کفیل/کفالت,
+      credit ladder/نردبان اعتباری, supplier panel, customers-me panel;
+      the COMPANY itself, its people, managers, board, products and services;
+      smalltalk (greetings, thanks, farewell).
+      OUT-OF-DOMAIN (BLOCK): clearly unrelated everyday domains — cooking,
+      sports, entertainment, travel, religion, politics — with no link to
+      credit or the company.
+      Detector signals are hints only — a keyword hit alone is NOT a violation.
+      Text: {{text}}
+      Signals: {{signals}}
+      End with exactly: VERDICT: allow|block + CATEGORY: out-of-domain|none
+    refusal: "این دستیار فقط در حوزه اعتبارسنجی و گزارش اعتباری پاسخ می‌دهد."
+    examples:
+      - text: "اعتبارسنجی چیست؟"
+        verdict: allow
+        why: "core credit question"
+      - text: "سلام"
+        verdict: allow
+        why: "smalltalk"
+      - text: "طرز تهیه قرمه‌سبزی چیست؟"
+        verdict: block
+        why: "cooking, unrelated domain"
+  - id: ungrounded-advice
+    title: "توصیه مالی بدون پشتوانه"
+    prompt: |-
+      You review answers of the ICS credit assistant. BLOCK only if the text gives
+      specific financial instructions (exact amounts, forged documents, evading checks,
+      guaranteed score manipulation) that are NOT grounded in retrieved sources.
+      General educational explanations about scores, reports, and procedures are ALLOW.
+      Detector signals are hints only.
+      Text: {{text}}
+      Signals: {{signals}}
+      End with exactly: VERDICT: allow|block + CATEGORY: ungrounded-advice|none
+    refusal: "نمی‌توانم دستورالعمل مالی خاص ارائه دهم؛ لطفاً به شعبه یا پشتیبانی مراجعه کنید."
+    examples:
+      - text: "امتیاز اعتباری بر اساس سابقه پرداخت محاسبه می‌شود."
+        verdict: allow
+        why: "general educational explanation"
+      - text: "برای بالا بردن امتیاز، سند جعلی بسازید."
+        verdict: block
+        why: "forged documents instruction"

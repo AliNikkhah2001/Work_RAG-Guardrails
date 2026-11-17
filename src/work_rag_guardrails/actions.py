@@ -134,7 +134,12 @@ def load_out_of_scope() -> Dict:
 
 _PERSIAN_INJECTION_REGEXES = [
     re.compile(r"(دستورات|پرامپت).*(قبلی|سیستم).*(نادیده|فراموش)"),
-    re.compile(r"(نقش|شخصیت).*(جدید|دان|DAN)"),
+    # Persona/jailbreak: «نقش جدید», «نقش DAN», «شخصیت جدید». Bound the gap to
+    # a short window (\W{0,6}) so ordinary credit prose cannot match — e.g.
+    # «در نقش ضامن ... سابقه جدید» previously tripped the unbounded `.*`
+    # (reason-code audit 2026-11-17: 8 records falsely blocked as
+    # prompt_injection).
+    re.compile(r"(نقش|شخصیت)\s*(?:جدیدی?|دان|DAN)\b"),
     re.compile(r"(نشان بده|فاش کن).*(پرامپت|کلید|توکن)"),
     re.compile(r"تمام دستورات.*فراموش کن"),
     re.compile(r"هوش مصنوعی بدون.*محدودیت"),
